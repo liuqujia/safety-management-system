@@ -1,0 +1,51 @@
+name: safety_management_app
+description: 安全整改管理系统手机端应用
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.6
+
+  # 网络请求
+  dio: ^5.4.0
+
+  # 图片选择
+  image_picker: ^1.0.7
+
+  # 状态管理
+  provider: ^6.1.1
+
+  # 本地存储
+  shared_preferences: ^2.2.2
+
+  # 图片缓存
+  cached_network_image: ^3.3.1
+
+  # 日期选择
+  intl: ^0.19.0
+
+  # 权限管理
+  permission_handler: ^11.3.0
+
+  # 路径工具
+  path_provider: ^2.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+
+  # assets:
+  #   - images/

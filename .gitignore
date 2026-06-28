@@ -1,0 +1,22 @@
+# 临时文件
+backend.tar.gz
+*.tar.gz
+*.pyc
+__pycache__/
+
+# 数据文件
+*.db
+data/
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 配置文件（包含敏感信息）
+config.json

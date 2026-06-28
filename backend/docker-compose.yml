@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  safety-management-api:
+    build: .                          # 使用当前目录的Dockerfile构建
+    container_name: safety-management-api
+    restart: unless-stopped           # 自动重启策略
+    ports:
+      - "9999:8000"                   # 端口映射：主机9999 -> 容器8000
+    volumes:
+      - /vol1/1000/工作资料/安全资料:/app/data              # 数据卷映射：持久化存储
+    environment:
+      - TZ=Asia/Shanghai
