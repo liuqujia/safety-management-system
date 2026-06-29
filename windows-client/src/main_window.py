@@ -210,6 +210,7 @@ class ImportPreviewDialog(QDialog):
         scroll_layout = QVBoxLayout(scroll_widget)
         scroll_layout.setSpacing(6)
 
+        self.item_rows = []  # [(row_widget, checkbox, idx_label)]
         for idx, item in enumerate(self.items):
             row = QWidget()
             row_layout = QHBoxLayout(row)
@@ -247,7 +248,22 @@ class ImportPreviewDialog(QDialog):
 
             content_layout.addStretch()
             row_layout.addWidget(content_widget, 1)
+
+            # 删除按钮
+            del_btn = QPushButton("删除")
+            del_btn.setStyleSheet("background-color: #F56C6C; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px;")
+            del_btn.setMinimumWidth(50)
+            del_btn.clicked.connect(lambda checked, r=row, c=cb, lbl=idx_label, dbtn=del_btn: self._remove_item(r, c, lbl, dbtn))
+            row_layout.addWidget(del_btn)
+
             scroll_layout.addWidget(row)
+            self.item_rows.append((row, cb, idx_label, del_btn))
+
+    def _remove_item(self, row, cb, idx_label, del_btn):
+        """从预览列表中物理删除这一行"""
+        row.hide()
+        cb.setChecked(False)  # 标记为跳过
+        self.update_count()
 
         scroll_layout.addStretch()
         scroll.setWidget(scroll_widget)
