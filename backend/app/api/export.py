@@ -327,7 +327,7 @@ def export_excel_with_photos(
 # ─────────────────────────────────────────────────────────────────────────────
 
 class RectificationReplyRequest(BaseModel):
-    project_name: str
+    project_name: Optional[str] = None  # 不填则自动取隐患列表第一个
     project_responsible: str
     reply_date: str
     issue_ids: Optional[List[int]] = None

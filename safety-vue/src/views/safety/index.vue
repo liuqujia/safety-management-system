@@ -185,22 +185,7 @@
     <!-- 导出整改回复对话框 -->
     <el-dialog v-model="replyDialogVisible" title="导出整改回复报告" width="520px">
       <el-form label-width="100px">
-        <el-form-item label="项目名称" required>
-          <el-input v-model="replyForm.project_name" placeholder="如未自动填充，请手动输入">
-            <template #append>
-              <el-dropdown @command="(p) => replyForm.project_name = p">
-                <el-button>
-                  从已有项目选 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item v-for="p in projectOptions" :key="p" :command="p">{{ p }}</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </template>
-          </el-input>
-        </el-form-item>
+
         <el-form-item label="项目负责人" required>
           <el-input v-model="replyForm.project_responsible" placeholder="请输入项目负责人" />
         </el-form-item>
@@ -573,30 +558,20 @@ const handleDialogClose = () => formRef.value?.resetFields()
 
 const openExportReplyDialog = () => {
   // 预填项目名称：当前筛选下若只有一种项目名则自动填入
-  const projects = [...new Set(issueList.value.map(i => i.project_name).filter(Boolean))]
-  if (projects.length === 1) {
-    replyForm.project_name = projects[0]
-  } else {
-    replyForm.project_name = ''
-  }
-  replyForm.project_responsible = ''
+  replyForm.project_responsible = ''  // 只清空责任人''
   replyForm.reply_date = ''
   replyForm.issue_ids = []
   replyDialogVisible.value = true
 }
 
 const doExportReply = async () => {
-  if (!replyForm.project_name) {
-    ElMessage.warning('请填写项目名称')
-    return
-  }
   if (!replyForm.project_responsible) {
-    ElMessage.warning('请填写项目负责人')
+    ElMessage.warning('请填写责任人')
     return
   }
   try {
     ElMessage.info('正在导出整改回复，请稍候...')
-    const data = { ...replyForm }
+    const { project_name, ...data } = replyForm  // 不传project_name，后端自动取
     if (!data.reply_date) {
       const now = new Date()
       data.reply_date = `${now.getFullYear()}年${String(now.getMonth() + 1).padStart(2, '0')}月${String(now.getDate()).padStart(2, '0')}日`

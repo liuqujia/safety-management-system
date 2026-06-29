@@ -574,9 +574,9 @@ class MainWindow(QMainWindow):
         try:
             result = self.api_client.import_from_word(file_path[0])
             if result and result.get('success'):
-                msg = f"成功导入 {result['imported_count']} 条隐患记录"
+                msg = f"✅ 成功导入 {result['imported_count']} 条隐患记录"
                 if result.get('project_name'):
-                    msg += f"\n项目：{result['project_name']}"
+                    msg += f"\n📋 项目：{result['project_name']}"
                 QMessageBox.information(self, "导入成功", msg)
                 self.refresh_issues()
             elif result:
@@ -834,36 +834,23 @@ class ExportReplyDialog(QDialog):
 
     def init_ui(self):
         self.setWindowTitle("导出整改回复")
-        self.setGeometry(300, 300, 500, 400)
+        self.setGeometry(400, 400, 400, 220)
 
         layout = QVBoxLayout()
         self.setLayout(layout)
 
         form = QFormLayout()
 
-        self.project_name_input = QLineEdit()
-        self.project_name_input.setPlaceholderText("请输入项目名称")
-        form.addRow("项目名称*:", self.project_name_input)
-
-        self.project_responsible_input = QLineEdit()
-        self.project_responsible_input.setPlaceholderText("请输入项目负责人")
-        form.addRow("项目负责人*:", self.project_responsible_input)
-
-        self.reply_date_input = QDateEdit()
-        self.reply_date_input.setCalendarPopup(True)
-        self.reply_date_input.setDate(QDate.currentDate())
-        form.addRow("回复日期:", self.reply_date_input)
-
-        self.issues_list = QListWidget()
-        self.issues_list.setSelectionMode(QListWidget.MultiSelection)
-        self.load_issues()
-        form.addRow("选择问题:", self.issues_list)
+        # 只保留责任人，其他自动填充
+        self.responsible_input = QLineEdit()
+        self.responsible_input.setPlaceholderText("请输入责任人")
+        form.addRow("责任人*:", self.responsible_input)
 
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()
         export_btn = QPushButton("导出")
-        export_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px 16px; border-radius: 4px;")
+        export_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px 20px; border-radius: 4px; font-size: 14px;")
         export_btn.clicked.connect(self.export_reply)
         btn_layout.addWidget(export_btn)
 
@@ -873,36 +860,10 @@ class ExportReplyDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
-    def load_issues(self):
-        try:
-            issues = self.parent_window.api_client.get_issues()
-            for issue in issues:
-                item = QListWidgetItem(f"#{issue['id']} - {issue['title']} [{issue['status']}]")
-                item.setData(Qt.UserRole, issue['id'])
-                self.issues_list.addItem(item)
-        except Exception as e:
-            QMessageBox.warning(self, "警告", f"加载问题列表失败: {str(e)}")
-
     def export_reply(self):
-        if not self.project_name_input.text():
-            QMessageBox.warning(self, "警告", "请填写项目名称")
+        if not self.responsible_input.text():
+            QMessageBox.warning(self, "警告", "请填写责任人")
             return
-
-        selected_ids = []
-        for i in range(self.issues_list.count()):
-            item = self.issues_list.item(i)
-            if item.isSelected():
-                selected_ids.append(item.data(Qt.UserRole))
-
-        if not selected_ids:
-            reply = QMessageBox.question(
-                self, '确认',
-                '未选择任何问题，将导出所有问题。是否继续？',
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply != QMessageBox.Yes:
-                return
 
         file_path = QFileDialog.getSaveFileName(
             self, "保存整改回复文件", "",
@@ -911,20 +872,22 @@ class ExportReplyDialog(QDialog):
 
         if file_path[0]:
             try:
-                date = self.reply_date_input.date()
+                date = QDate.currentDate()
                 date_str = f"{date.year()}年{date.month()}月{date.day()}日"
                 
                 content = self.parent_window.api_client.export_rectification_reply(
-                    self.project_name_input.text(),
-                    self.project_responsible_input.text(),
-                    date_str,
-                    selected_ids if selected_ids else None
+                    project_name=None,
+                    project_responsible=self.responsible_input.text(),
+                    reply_date=date_str,
+                    issues=None
                 )
                 if content:
                     with open(file_path[0], 'wb') as f:
                         f.write(content)
-                    QMessageBox.information(self, "成功", "整改回复已导出")
+                    QMessageBox.information(self, "成功", f"整改回复已导出：\n{file_path[0]}")
                     self.accept()
+                else:
+                    QMessageBox.warning(self, "失败", "服务器返回为空")
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"导出失败: {str(e)}")
 

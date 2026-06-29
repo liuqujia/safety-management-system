@@ -203,18 +203,18 @@ async def preview_from_word(file: UploadFile = File(...)):
         contents = await file.read()
         doc = Document(io.BytesIO(contents))
 
-        # 项目名称 = 企业名称栏的值（如"SP 7.8KM CLUB"），用正则截取到隐患条数/检查时间之前
+        # 项目名称 = 企业名称栏的值，取"企业名称："后到"隐患条数/检查时间"之间的完整文本
         project_name = ""
         for paragraph in doc.paragraphs:
             text = paragraph.text.strip()
             if not text:
                 continue
             if "企业名称" in text:
-                val = re.search(r'企业名称[：:]\s*(.*?)(?=\s{2,}隐患条数|\s{2,}检查时间|\s{2,}检查人|\s{2,}隐患条数|$)', text, re.DOTALL)
+                val = re.search(r'企业名称[：:]\s+(.+?)(?:\s{2,}隐患|\s{2,}检查|$)', text, re.DOTALL)
                 if val:
                     project_name = val.group(1).strip()
             if "项目名称" in text and not project_name:
-                val = re.search(r'项目名称[：:]\s*(.*?)(?=\s{2,}隐患条数|\s{2,}检查时间|\s{2,}检查人|$)', text, re.DOTALL)
+                val = re.search(r'项目名称[：:]\s+(.+?)(?:\s{2,}隐患|\s{2,}检查|$)', text, re.DOTALL)
                 if val:
                     project_name = val.group(1).strip()
 
@@ -269,17 +269,17 @@ async def import_from_word(
         
         debug_info = []
         
-        # 项目名称 = 企业名称栏的值，用正则截取到隐患条数/检查时间之前
+        # 项目名称 = 企业名称栏的值，取"企业名称："后到"隐患条数/检查时间"之间的完整文本
         for paragraph in doc.paragraphs:
             text = paragraph.text.strip()
             if text:
                 debug_info.append(f"段落: {text[:100]}")
             if "企业名称" in text and not detected_project_name:
-                val = re.search(r'企业名称[：:]\s*(.*?)(?=\s{2,}隐患条数|\s{2,}检查时间|\s{2,}检查人|\s{2,}隐患条数|$)', text, re.DOTALL)
+                val = re.search(r'企业名称[：:]\s+(.+?)(?:\s{2,}隐患|\s{2,}检查|$)', text, re.DOTALL)
                 if val:
                     detected_project_name = val.group(1).strip()
             if "项目名称" in text and not detected_project_name:
-                val = re.search(r'项目名称[：:]\s*(.*?)(?=\s{2,}隐患条数|\s{2,}检查时间|\s{2,}检查人|$)', text, re.DOTALL)
+                val = re.search(r'项目名称[：:]\s+(.+?)(?:\s{2,}隐患|\s{2,}检查|$)', text, re.DOTALL)
                 if val:
                     detected_project_name = val.group(1).strip()
         
