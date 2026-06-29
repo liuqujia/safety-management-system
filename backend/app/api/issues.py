@@ -203,14 +203,20 @@ async def preview_from_word(file: UploadFile = File(...)):
         contents = await file.read()
         doc = Document(io.BytesIO(contents))
 
+        # 项目名称 = 企业名称：优先取段落[0]（通常就是企业全称）
         project_name = ""
+        first_para = doc.paragraphs[0].text.strip() if doc.paragraphs else ""
+        # 如果段落[0]像是正式名称（非空且非标题类文字），用它
+        if first_para and not any(k in first_para for k in ["隐患", "检查", "委托", "整改", "报告", "表"]):
+            project_name = first_para
+        # 其次从段落中找"企业名称："或"项目名称："
         for paragraph in doc.paragraphs:
             text = paragraph.text.strip()
             if not text:
                 continue
-            if "企业名称" in text:
+            if "企业名称" in text and not project_name:
                 project_name = text.replace("企业名称：", "").replace("企业名称:", "").strip()
-                project_name = project_name.split("隐患条数")[0].strip()
+                project_name = project_name.split("隐患条数")[0].split("检查时间")[0].strip()
             if "项目名称" in text and not project_name:
                 project_name = text.replace("项目名称：", "").replace("项目名称:", "").strip()
 
@@ -265,14 +271,19 @@ async def import_from_word(
         
         debug_info = []
         
+        # 优先取段落[0]作为企业名称（通常是企业全称）
+        first_para = doc.paragraphs[0].text.strip() if doc.paragraphs else ""
+        if first_para and not any(k in first_para for k in ["隐患", "检查", "委托", "整改", "报告", "表"]):
+            detected_project_name = first_para
+        
         for paragraph in doc.paragraphs:
             text = paragraph.text.strip()
             if text:
                 debug_info.append(f"段落: {text[:100]}")
-            if "企业名称" in text:
+            if "企业名称" in text and not detected_project_name:
                 detected_project_name = text.replace("企业名称：", "").replace("企业名称:", "").strip()
-                detected_project_name = detected_project_name.split("隐患条数")[0].strip()
-            if "项目名称" in text:
+                detected_project_name = detected_project_name.split("隐患条数")[0].split("检查时间")[0].strip()
+            if "项目名称" in text and not detected_project_name:
                 detected_project_name = text.replace("项目名称：", "").replace("项目名称:", "").strip()
         
         # 优先用前端传的 project_name（用户在预览框里可能改过），否则用文档里识别到的
