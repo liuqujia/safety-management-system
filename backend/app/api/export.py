@@ -408,6 +408,16 @@ def export_rectification_reply(
     request: RectificationReplyRequest,
     db: Session = Depends(get_db)
 ):
+    """
+    按照用户模板格式导出整改回复
+    模板结构：
+    - 行1: 标题（合并A1:E1）
+    - 行2: 项目名称
+    - 行3: 项目负责人
+    - 行4-7: 隐患事项1（整改事项回复、整改措施、整改前/后照片）
+    - ... 每个隐患占4行
+    - 最后: 回复日期
+    """
     query = db.query(SafetyIssue)
     if request.issue_ids:
         query = query.filter(SafetyIssue.id.in_(request.issue_ids))
@@ -419,8 +429,16 @@ def export_rectification_reply(
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "整改回复"
+    ws.title = "Sheet1"
 
+    # 设置列宽（与模板一致）
+    ws.column_dimensions['A'].width = 14.875
+    ws.column_dimensions['B'].width = 9.625
+    ws.column_dimensions['C'].width = 25.625
+    ws.column_dimensions['D'].width = 9.625
+    ws.column_dimensions['E'].width = 25.625
+
+    # 边框样式
     thin_border = Border(
         left=Side(style='thin'),
         right=Side(style='thin'),
@@ -428,102 +446,134 @@ def export_rectification_reply(
         bottom=Side(style='thin')
     )
 
-    ws.column_dimensions['A'].width = 20
-    ws.column_dimensions['B'].width = 80
-
+    # 字体样式
     title_font = Font(bold=True, size=16)
-    title_alignment = Alignment(horizontal="center", vertical="center")
     header_font = Font(bold=True, size=11)
+    normal_font = Font(size=11)
+    center_alignment = Alignment(horizontal="center", vertical="center")
+    left_alignment = Alignment(horizontal="left", vertical="center")
 
     current_row = 1
 
-    ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=2)
+    # 行1: 标题
+    ws.merge_cells(f'A{current_row}:E{current_row}')
     title_cell = ws.cell(row=current_row, column=1, value=f"《关于{request.reply_date}安全隐患整改有关事项回复》")
     title_cell.font = title_font
-    title_cell.alignment = title_alignment
-    ws.row_dimensions[current_row].height = 35
+    title_cell.alignment = center_alignment
+    ws.row_dimensions[current_row].height = 30
+    for col in range(1, 6):
+        ws.cell(row=current_row, column=col).border = thin_border
     current_row += 1
 
-    def add_info_row(label, value):
-        nonlocal current_row
-        ws.cell(row=current_row, column=1, value=label).font = header_font
-        ws.cell(row=current_row, column=2, value=value)
-        ws.row_dimensions[current_row].height = 25
-        for col in range(1, 3):
-            ws.cell(row=current_row, column=col).border = thin_border
-        current_row += 1
+    # 行2: 项目名称
+    ws.cell(row=current_row, column=1, value="项目名称").font = header_font
+    ws.cell(row=current_row, column=1).alignment = left_alignment
+    ws.cell(row=current_row, column=1).border = thin_border
+    ws.merge_cells(f'B{current_row}:E{current_row}')
+    ws.cell(row=current_row, column=2, value=request.project_name).font = normal_font
+    ws.cell(row=current_row, column=2).alignment = left_alignment
+    for col in range(2, 6):
+        ws.cell(row=current_row, column=col).border = thin_border
+    ws.row_dimensions[current_row].height = 22
+    current_row += 1
 
-    add_info_row("项目名称", request.project_name)
-    add_info_row("项目负责人", request.project_responsible)
+    # 行3: 项目负责人
+    ws.cell(row=current_row, column=1, value="项目负责人").font = header_font
+    ws.cell(row=current_row, column=1).alignment = left_alignment
+    ws.cell(row=current_row, column=1).border = thin_border
+    ws.merge_cells(f'B{current_row}:E{current_row}')
+    ws.cell(row=current_row, column=2, value=request.project_responsible).font = normal_font
+    ws.cell(row=current_row, column=2).alignment = left_alignment
+    for col in range(2, 6):
+        ws.cell(row=current_row, column=col).border = thin_border
+    ws.row_dimensions[current_row].height = 22
+    current_row += 1
 
+    # 每个隐患事项（占4行）
     for idx, issue in enumerate(issues, 1):
-        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=2)
-        ws.cell(row=current_row, column=1, value=f"隐患事项{idx}：{issue.title}").font = Font(bold=True, size=11)
-        ws.row_dimensions[current_row].height = 25
-        for col in range(1, 3):
+        # 行4: 整改事项回复 + 隐患标题
+        ws.merge_cells(f'A{current_row}:A{current_row+3}')
+        ws.cell(row=current_row, column=1, value="整改事项回复").font = header_font
+        ws.cell(row=current_row, column=1).alignment = center_alignment
+        ws.cell(row=current_row, column=1).border = thin_border
+        for r in range(current_row, current_row+4):
+            ws.cell(row=r, column=1).border = thin_border
+
+        ws.merge_cells(f'B{current_row}:E{current_row}')
+        ws.cell(row=current_row, column=2, value=f"隐患事项{idx}：{issue.title}").font = header_font
+        ws.cell(row=current_row, column=2).alignment = left_alignment
+        for col in range(2, 6):
             ws.cell(row=current_row, column=col).border = thin_border
+        ws.row_dimensions[current_row].height = 32
         current_row += 1
 
-        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=2)
-        ws.cell(row=current_row, column=1, value=f"整改措施：{issue.notes if issue.notes else '已整改'}")
-        ws.row_dimensions[current_row].height = 25
-        for col in range(1, 3):
+        # 行5: 整改措施
+        ws.merge_cells(f'B{current_row}:E{current_row}')
+        ws.cell(row=current_row, column=2, value=f"整改措施：{issue.notes if issue.notes else '已整改'}").font = normal_font
+        ws.cell(row=current_row, column=2).alignment = left_alignment
+        for col in range(2, 6):
             ws.cell(row=current_row, column=col).border = thin_border
+        ws.row_dimensions[current_row].height = 22
         current_row += 1
 
-        ws.cell(row=current_row, column=1, value="整改前照片：").font = header_font
-        ws.cell(row=current_row, column=2, value="整改后照片：").font = header_font
-        for col in range(1, 3):
-            ws.cell(row=current_row, column=col).border = thin_border
+        # 行6: 照片标签
+        ws.cell(row=current_row, column=2, value="整改前照片：").font = header_font
+        ws.cell(row=current_row, column=2).alignment = left_alignment
+        ws.cell(row=current_row, column=2).border = thin_border
+        ws.cell(row=current_row, column=3).border = thin_border
+        ws.cell(row=current_row, column=4, value="整改后照片：").font = header_font
+        ws.cell(row=current_row, column=4).alignment = left_alignment
+        ws.cell(row=current_row, column=4).border = thin_border
+        ws.cell(row=current_row, column=5).border = thin_border
+        ws.row_dimensions[current_row].height = 19
         current_row += 1
+
+        # 行7: 照片区域
+        ws.merge_cells(f'B{current_row-1}:C{current_row}')
+        ws.merge_cells(f'D{current_row-1}:E{current_row}')
 
         issue_photos = [p for p in issue.photos if p.photo_type == "问题照片"]
         rect_photos = [p for p in issue.photos if p.photo_type == "整改照片"]
 
-        max_photos = max(len(issue_photos), len(rect_photos), 1)
-        photo_height = 150
+        # 整改前照片（B-C列）
+        if issue_photos:
+            photo = issue_photos[0]
+            try:
+                if os.path.exists(photo.file_path):
+                    img = XLImage(photo.file_path)
+                    img.width = 150
+                    img.height = 100
+                    ws.add_image(img, f'B{current_row}')
+            except Exception as e:
+                pass
 
-        for photo_idx in range(max_photos):
-            ws.cell(row=current_row, column=1, value="")
-            ws.cell(row=current_row, column=2, value="")
+        # 整改后照片（D-E列）
+        if rect_photos:
+            photo = rect_photos[0]
+            try:
+                if os.path.exists(photo.file_path):
+                    img = XLImage(photo.file_path)
+                    img.width = 150
+                    img.height = 100
+                    ws.add_image(img, f'D{current_row}')
+            except Exception as e:
+                pass
 
-            if photo_idx < len(issue_photos):
-                photo = issue_photos[photo_idx]
-                try:
-                    if os.path.exists(photo.file_path):
-                        img = XLImage(photo.file_path)
-                        img.width = 200
-                        img.height = 150
-                        ws.add_image(img, f'A{current_row}')
-                except Exception as e:
-                    pass
-
-            if photo_idx < len(rect_photos):
-                photo = rect_photos[photo_idx]
-                try:
-                    if os.path.exists(photo.file_path):
-                        img = XLImage(photo.file_path)
-                        img.width = 200
-                        img.height = 150
-                        ws.add_image(img, f'B{current_row}')
-                except Exception as e:
-                    pass
-
-            ws.row_dimensions[current_row].height = photo_height
-            for col in range(1, 3):
-                ws.cell(row=current_row, column=col).border = thin_border
-            current_row += 1
-
-        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=2)
-        ws.cell(row=current_row, column=1, value="整改事项回复")
-        ws.row_dimensions[current_row].height = photo_height
-        for col in range(1, 3):
+        for col in range(2, 6):
             ws.cell(row=current_row, column=col).border = thin_border
+        ws.row_dimensions[current_row].height = 106
         current_row += 1
 
-        current_row += 1
-
-    add_info_row("回复日期", request.reply_date)
+    # 回复日期
+    ws.cell(row=current_row, column=1, value="回复日期").font = header_font
+    ws.cell(row=current_row, column=1).alignment = left_alignment
+    ws.cell(row=current_row, column=1).border = thin_border
+    ws.merge_cells(f'B{current_row}:E{current_row}')
+    ws.cell(row=current_row, column=2, value=request.reply_date).font = normal_font
+    ws.cell(row=current_row, column=2).alignment = left_alignment
+    for col in range(2, 6):
+        ws.cell(row=current_row, column=col).border = thin_border
+    ws.row_dimensions[current_row].height = 22
 
     output = io.BytesIO()
     wb.save(output)
