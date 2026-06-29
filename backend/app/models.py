@@ -16,10 +16,10 @@ class SafetyIssue(Base):
     responsible_person = Column(String(100), comment="责任人")
     deadline = Column(Date, comment="整改期限")
     notes = Column(Text, comment="备注")
+    project_name = Column(String(200), comment="项目名称")
     create_time = Column(DateTime, default=datetime.now, comment="创建时间")
     update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
 
-    # 关联照片
     photos = relationship("Photo", back_populates="issue", cascade="all, delete-orphan")
 
     def to_dict(self):
@@ -34,6 +34,7 @@ class SafetyIssue(Base):
             "responsible_person": self.responsible_person,
             "deadline": self.deadline.isoformat() if self.deadline else None,
             "notes": self.notes,
+            "project_name": self.project_name,
             "create_time": self.create_time.isoformat() if self.create_time else None,
             "update_time": self.update_time.isoformat() if self.update_time else None,
             "photo_count": len(self.photos),
@@ -53,7 +54,6 @@ class Photo(Base):
     upload_time = Column(DateTime, default=datetime.now, comment="上传时间")
     description = Column(Text, comment="照片说明")
 
-    # 关联问题
     issue = relationship("SafetyIssue", back_populates="photos")
 
     def to_dict(self):

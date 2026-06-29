@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import date
+from datetime import date, datetime
 import os
 import uuid
 from PIL import Image
@@ -160,6 +160,27 @@ def update_status(
     db.refresh(db_issue)
     return db_issue.to_dict()
 
+def parse_deadline(deadline_str):
+    if not deadline_str:
+        return None
+    match = re.search(r'(\d+)月(\d+)日', deadline_str)
+    if match:
+        month = int(match.group(1))
+        day = int(match.group(2))
+        year = datetime.now().year
+        return date(year, month, day)
+    return None
+
+def extract_images_from_doc(doc, issue_id):
+    images = []
+    for rel in doc.part.rels.values():
+        if "image" in rel.target_ref:
+            image_data = rel.target_part.blob
+            file_ext = os.path.splitext(rel.target_ref)[1] or '.png'
+            file_name = f"{issue_id}_{uuid.uuid4().hex[:8]}{file_ext}"
+            images.append((file_name, image_data))
+    return images
+
 @router.post("/import-from-word")
 async def import_from_word(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
@@ -180,11 +201,17 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
                 debug_info.append(f"段落: {text[:100]}")
             if "企业名称" in text:
                 project_name = text.replace("企业名称：", "").replace("企业名称:", "").strip()
+                project_name = project_name.split("隐患条数")[0].strip()
             if "项目名称" in text:
                 project_name = text.replace("项目名称：", "").replace("项目名称:", "").strip()
         
         debug_info.append(f"项目名称: {project_name}")
         debug_info.append(f"表格数量: {len(doc.tables)}")
+        
+        all_images = extract_images_from_doc(doc, 0)
+        debug_info.append(f"文档中提取到图片数量: {len(all_images)}")
+        
+        image_idx = 0
         
         for table_idx, table in enumerate(doc.tables):
             debug_info.append(f"表格{table_idx}: {len(table.rows)}行 x {len(table.columns)}列")
@@ -205,28 +232,27 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
                     notes = ""
                     deadline = None
                     
-                    for cell in cells:
-                        cell_text = cell.text.strip()
-                        if cell_text:
-                            if "隐患" in cell_text or "问题" in cell_text or len(cell_text) > 10:
-                                if not title:
-                                    title = cell_text
-                                else:
-                                    description = description + "\n" + cell_text
-                            elif "法规" in cell_text or "条款" in cell_text or "标准" in cell_text:
-                                description = description + "\n" + cell_text
-                            elif "整改" in cell_text:
-                                notes = notes + "\n" + cell_text
-                            elif "时限" in cell_text or "期限" in cell_text:
-                                match = re.search(r'(\d+月\d+日)', cell_text)
-                                if match:
-                                    deadline = match.group(1)
+                    debug_info.append(f"  cells长度: {len(cells)}")
+                    
+                    if len(cells) >= 3:
+                        title = cells[2].text.strip()
+                        debug_info.append(f"  title值: '{title}'")
+                    if len(cells) >= 4:
+                        description = cells[3].text.strip()
+                    if len(cells) >= 5:
+                        notes = cells[4].text.strip()
+                    if len(cells) >= 6:
+                        remarks = cells[5].text.strip()
+                        deadline = parse_deadline(remarks)
+                        debug_info.append(f"  deadline值: {deadline}")
                     
                     if not title:
+                        debug_info.append(f"  title为空，尝试查找")
                         for cell in cells:
                             cell_text = cell.text.strip()
-                            if cell_text and len(cell_text) > 5:
+                            if cell_text and len(cell_text) > 2:
                                 title = cell_text
+                                debug_info.append(f"  找到title: '{title}'")
                                 break
                     
                     if title:
@@ -242,16 +268,40 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
                             'notes': notes[:500] if notes else None
                         }
                         
-                        db_issue = SafetyIssue(**issue_data)
-                        db.add(db_issue)
-                        db.commit()
-                        db.refresh(db_issue)
-                        imported_count += 1
-                        debug_info.append(f"  -> 成功导入: {title[:50]}")
+                        try:
+                            db_issue = SafetyIssue(**issue_data)
+                            db.add(db_issue)
+                            db.commit()
+                            db.refresh(db_issue)
+                            
+                            if image_idx < len(all_images):
+                                file_name, image_data = all_images[image_idx]
+                                photos_dir = os.path.join("data", "photos", str(db_issue.id))
+                                os.makedirs(photos_dir, exist_ok=True)
+                                file_path = os.path.join(photos_dir, file_name)
+                                with open(file_path, "wb") as f:
+                                    f.write(image_data)
+                                db_photo = Photo(
+                                    issue_id=db_issue.id,
+                                    photo_type="问题照片",
+                                    file_path=file_path,
+                                    file_name=file_name
+                                )
+                                db.add(db_photo)
+                                debug_info.append(f"  -> 关联图片: {file_name}")
+                                image_idx += 1
+                            
+                            imported_count += 1
+                            debug_info.append(f"  -> 成功导入: {title[:50]}")
+                        except Exception as db_err:
+                            db.rollback()
+                            debug_info.append(f"  -> 数据库错误: {str(db_err)}")
+                            errors.append(f"第{row_idx}行数据库错误: {str(db_err)}")
                     else:
                         debug_info.append(f"  -> 跳过（无标题）")
                 except Exception as e:
                     errors.append(f"第{row_idx}行导入失败: {str(e)}")
+                    debug_info.append(f"  -> 错误: {str(e)}")
         
         db.commit()
         
@@ -262,7 +312,8 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
             'project_name': project_name,
             'tables_found': len(doc.tables),
             'paragraphs_count': len(doc.paragraphs),
-            'debug': debug_info[:50]
+            'images_found': len(all_images),
+            'debug': debug_info[:100]
         }
     except Exception as e:
         return {'success': False, 'message': str(e)}

@@ -6,10 +6,15 @@ ssh.connect('192.168.31.105', port=22, username='Kirito', password='Jia501688921
 
 sftp = ssh.open_sftp()
 
-print("上传export.py...")
-local_path = '/Users/kirito/Downloads/12/111/backend/app/api/export.py'
-remote_path = '/vol2/1000/Docker/anquan/backend/app/api/export.py'
-sftp.put(local_path, remote_path)
+print("读取export.py...")
+with sftp.file('/vol2/1000/Docker/anquan/backend/app/api/export.py', 'r') as f:
+    content = f.read().decode('utf-8')
+
+content = content.replace('cell = ws.cell(row=row_num, column=col_num, value=header)', 'cell = ws.cell(row=1, column=col_num, value=header)')
+
+print("写入export.py...")
+with sftp.file('/vol2/1000/Docker/anquan/backend/app/api/export.py', 'w') as f:
+    f.write(content.encode('utf-8'))
 
 sftp.close()
 
@@ -29,3 +34,4 @@ print(stdout.read().decode('utf-8'))
 print(stderr.read().decode('utf-8'))
 
 ssh.close()
+print("\n修复完成！")

@@ -137,6 +137,27 @@ class APIClient:
             )
         return response.json() if response.status_code == 200 else None
 
+    def get_templates(self):
+        response = requests.get(f"{self.base_url}/api/export/templates", timeout=30)
+        return response.json() if response.status_code == 200 else []
+
+    def export_excel_with_template(self, status=None, severity=None, template_id=None):
+        params = {}
+        if status:
+            params['status'] = status
+        if severity:
+            params['severity'] = severity
+        if template_id:
+            params['template_id'] = template_id
+        response = requests.get(
+            f"{self.base_url}/api/export/excel",
+            params=params,
+            timeout=60
+        )
+        if response.status_code == 200:
+            return response.content
+        return None
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -232,6 +253,11 @@ class MainWindow(QMainWindow):
         export_reply_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px 16px; border-radius: 4px;")
         export_reply_btn.clicked.connect(self.export_rectification_reply_dialog)
         function_bar.addWidget(export_reply_btn)
+
+        template_btn = QPushButton("模板管理")
+        template_btn.setStyleSheet("background-color: #00BCD4; color: white; padding: 8px 16px; border-radius: 4px;")
+        template_btn.clicked.connect(self.template_management_dialog)
+        function_bar.addWidget(template_btn)
 
         main_layout.addWidget(function_bar)
 
@@ -565,6 +591,44 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "错误", f"导入失败: {str(e)}")
 
     def export_excel_dialog(self):
+        try:
+            templates = self.api_client.get_templates()
+        except Exception as e:
+            templates = []
+            QMessageBox.warning(self, "警告", f"获取模板列表失败: {str(e)}")
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("导出Excel")
+        dialog.setGeometry(300, 300, 450, 250)
+
+        layout = QVBoxLayout()
+
+        form = QFormLayout()
+
+        self.template_combo = QComboBox()
+        self.template_combo.addItem("默认模板", 0)
+        for template in templates:
+            self.template_combo.addItem(template['name'], template['id'])
+        form.addRow("选择模板:", self.template_combo)
+
+        layout.addLayout(form)
+
+        btn_layout = QHBoxLayout()
+        export_btn = QPushButton("导出")
+        export_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 8px 16px; border-radius: 4px;")
+        export_btn.clicked.connect(lambda: self.do_export(dialog))
+        btn_layout.addWidget(export_btn)
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+        dialog.setLayout(layout)
+
+        dialog.exec_()
+
+    def do_export(self, dialog):
         file_path = QFileDialog.getSaveFileName(
             self, "保存Excel文件", "",
             "Excel (*.xlsx)"
@@ -575,11 +639,16 @@ class MainWindow(QMainWindow):
                 severity = self.severity_filter.currentText()
                 status_param = None if status == "全部" else status
                 severity_param = None if severity == "全部" else severity
-                content = self.api_client.export_excel(status_param, severity_param)
+                
+                template_id = self.template_combo.currentData()
+                template_id = None if template_id == 0 else template_id
+                
+                content = self.api_client.export_excel_with_template(status_param, severity_param, template_id)
                 if content:
                     with open(file_path[0], 'wb') as f:
                         f.write(content)
                     QMessageBox.information(self, "成功", "Excel文件已导出")
+                    dialog.accept()
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"导出失败: {str(e)}")
 
@@ -875,6 +944,179 @@ class ExportReplyDialog(QDialog):
                     self.accept()
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"导出失败: {str(e)}")
+
+class TemplateManagementDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent_window = parent
+        self.init_ui()
+        self.load_templates()
+
+    def init_ui(self):
+        self.setWindowTitle("模板管理")
+        self.setGeometry(300, 300, 600, 400)
+
+        layout = QVBoxLayout()
+
+        self.template_table = QTableWidget()
+        self.template_table.setColumnCount(3)
+        self.template_table.setHorizontalHeaderLabels(["ID", "模板名称", "操作"])
+        self.template_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.template_table)
+
+        btn_layout = QHBoxLayout()
+
+        add_btn = QPushButton("新建模板")
+        add_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 6px 12px; border-radius: 4px;")
+        add_btn.clicked.connect(self.add_template)
+        btn_layout.addWidget(add_btn)
+
+        edit_btn = QPushButton("编辑模板")
+        edit_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 6px 12px; border-radius: 4px;")
+        edit_btn.clicked.connect(self.edit_template)
+        btn_layout.addWidget(edit_btn)
+
+        delete_btn = QPushButton("删除模板")
+        delete_btn.setStyleSheet("background-color: #f44336; color: white; padding: 6px 12px; border-radius: 4px;")
+        delete_btn.clicked.connect(self.delete_template)
+        btn_layout.addWidget(delete_btn)
+
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(close_btn)
+
+        layout.addLayout(btn_layout)
+        self.setLayout(layout)
+
+    def load_templates(self):
+        try:
+            templates = self.parent_window.api_client.get_templates()
+            self.template_table.setRowCount(len(templates))
+            for row, template in enumerate(templates):
+                self.template_table.setItem(row, 0, QTableWidgetItem(str(template['id'])))
+                self.template_table.setItem(row, 1, QTableWidgetItem(template['name']))
+                
+                delete_btn = QPushButton("删除")
+                delete_btn.setStyleSheet("color: red;")
+                delete_btn.clicked.connect(lambda checked, tid=template['id']: self.confirm_delete(tid))
+                self.template_table.setCellWidget(row, 2, delete_btn)
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"加载模板失败: {str(e)}")
+
+    def add_template(self):
+        dialog = TemplateEditDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            self.load_templates()
+
+    def edit_template(self):
+        current_row = self.template_table.currentRow()
+        if current_row >= 0:
+            template_id = int(self.template_table.item(current_row, 0).text())
+            template_name = self.template_table.item(current_row, 1).text()
+            dialog = TemplateEditDialog(self, template_id, template_name)
+            if dialog.exec_() == QDialog.Accepted:
+                self.load_templates()
+
+    def confirm_delete(self, template_id):
+        reply = QMessageBox.question(
+            self, '确认删除',
+            '确定要删除这个模板吗？',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self.delete_template_by_id(template_id)
+
+    def delete_template(self):
+        current_row = self.template_table.currentRow()
+        if current_row >= 0:
+            template_id = int(self.template_table.item(current_row, 0).text())
+            self.confirm_delete(template_id)
+
+    def delete_template_by_id(self, template_id):
+        try:
+            response = requests.delete(
+                f"{self.parent_window.server_url}/api/export/templates/{template_id}",
+                timeout=30
+            )
+            if response.status_code == 200:
+                QMessageBox.information(self, "成功", "模板已删除")
+                self.load_templates()
+            else:
+                QMessageBox.warning(self, "错误", "删除失败")
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"删除失败: {str(e)}")
+
+class TemplateEditDialog(QDialog):
+    def __init__(self, parent, template_id=None, template_name=""):
+        super().__init__(parent)
+        self.parent_window = parent
+        self.template_id = template_id
+        self.init_ui(template_name)
+
+    def init_ui(self, template_name):
+        self.setWindowTitle("编辑模板" if self.template_id else "新建模板")
+        self.setGeometry(300, 300, 450, 250)
+
+        layout = QVBoxLayout()
+
+        form = QFormLayout()
+
+        self.name_input = QLineEdit(template_name)
+        self.name_input.setPlaceholderText("请输入模板名称")
+        form.addRow("模板名称*:", self.name_input)
+
+        self.title_format_input = QLineEdit("《关于{date}安全隐患整改有关事项回复》")
+        self.title_format_input.setPlaceholderText("标题格式，{date}会被替换为日期")
+        form.addRow("标题格式:", self.title_format_input)
+
+        layout.addLayout(form)
+
+        btn_layout = QHBoxLayout()
+
+        save_btn = QPushButton("保存")
+        save_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px 16px; border-radius: 4px;")
+        save_btn.clicked.connect(self.save_template)
+        btn_layout.addWidget(save_btn)
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+        self.setLayout(layout)
+
+    def save_template(self):
+        if not self.name_input.text():
+            QMessageBox.warning(self, "警告", "请填写模板名称")
+            return
+
+        data = {
+            'name': self.name_input.text(),
+            'title_format': self.title_format_input.text()
+        }
+
+        try:
+            if self.template_id:
+                response = requests.put(
+                    f"{self.parent_window.server_url}/api/export/templates/{self.template_id}",
+                    json=data,
+                    timeout=30
+                )
+            else:
+                response = requests.post(
+                    f"{self.parent_window.server_url}/api/export/templates",
+                    json=data,
+                    timeout=30
+                )
+
+            if response.status_code == 200:
+                QMessageBox.information(self, "成功", "模板已保存")
+                self.accept()
+            else:
+                QMessageBox.warning(self, "错误", "保存失败")
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"保存失败: {str(e)}")
 
 def main():
     app = QApplication(sys.argv)
