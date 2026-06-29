@@ -67,6 +67,7 @@ class PhotoResponse(BaseModel):
 class IssueResponse(BaseModel):
     """问题响应模型"""
     id: int
+    project_name: Optional[str] = None
     title: str
     description: Optional[str] = None
     location: Optional[str] = None

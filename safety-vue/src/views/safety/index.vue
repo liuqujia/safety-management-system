@@ -33,6 +33,7 @@
         <el-button type="primary" icon="Plus" @click="handleAdd">新增问题</el-button>
         <el-button type="info" icon="Upload" @click="openImportDialog">导入问题清单</el-button>
         <el-button type="warning" icon="Document" @click="openExportReplyDialog">导出整改回复</el-button>
+        <el-button type="success" icon="Download" @click="doExportLedger" plain>导出检查记录</el-button>
         <el-button type="primary" icon="Setting" @click="templateDialogVisible = true" plain>模板管理</el-button>
       </div>
     </div>
@@ -94,6 +95,20 @@
             <div v-if="group.issues.length === 0" style="line-height:60px;text-align:center;color:#999">暂无隐患</div>
           </div>
         </transition>
+      </div>
+
+      <!-- 全局分页 -->
+      <div class="pagination-wrap">
+        <el-pagination
+          v-model:current-page="queryParams.page"
+          v-model:page-size="queryParams.limit"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+          @current-change="onPageChange"
+          @size-change="onSizeChange"
+        />
       </div>
     </div>
 
@@ -202,6 +217,9 @@
     <el-dialog v-model="replyDialogVisible" title="导出整改回复报告" width="520px">
       <el-form label-width="100px">
 
+        <el-form-item label="项目名称">
+          <el-input v-model="replyForm.project_name" placeholder="不填则导出所有项目的问题" clearable />
+        </el-form-item>
         <el-form-item label="项目负责人" required>
           <el-input v-model="replyForm.project_responsible" placeholder="请输入项目负责人" />
         </el-form-item>
@@ -349,7 +367,7 @@ import {
   getIssues, getIssue, createIssue, updateIssue, deleteIssue,
   uploadPhoto, downloadPhoto,
   getTemplates, createTemplate, updateTemplate, deleteTemplate,
-  exportRectificationReply, importFromWord, previewFromWord, getProjects
+  exportRectificationReply, exportExcel, importFromWord, previewFromWord, getProjects
 } from '@/api/safety'
 
 const loading = ref(false)
@@ -359,11 +377,14 @@ const templateList = ref([])
 const projectOptions = ref([])
 const queryParams = reactive({
   page: 1,
-  limit: 100,
+  limit: 20,
   status: '',
   severity: '',
   project_name: ''
 })
+
+// skip 根据 page 和 limit 自动计算
+const skip = computed(() => (queryParams.page - 1) * queryParams.limit)
 
 // 对话框状态
 const dialogVisible = ref(false)
@@ -447,9 +468,12 @@ const toggleProject = (name) => {
 }
 
 const exportProjectReply = (group) => {
-  replyForm.project_name = group.project_name || ''
+  replyForm.project_name = ''
   replyForm.project_responsible = ''
-  replyForm.reply_date = ''
+  replyForm.reply_date = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}年${String(d.getMonth()+1).padStart(2,'0')}月${String(d.getDate()).padStart(2,'0')}日`
+  })()
   replyForm.issue_ids = group.issues.map(i => i.id)
   replyDialogVisible.value = true
 }
@@ -467,6 +491,11 @@ watch(issueList, () => {
     expandedProjects[key] = true
   }
 }, { immediate: true })
+
+// queryParams 变化时重新加载（翻页、切换每页条数）
+watch(queryParams, () => {
+  getList()
+}, { deep: true })
 
 // ── 导入 word 需要 computed ──────────────────────────────────────────────
 
@@ -486,12 +515,29 @@ const loadProjects = async () => {
   }
 }
 
+const onPageChange = (page) => {
+  queryParams.page = page
+  getList()
+}
+
+const onSizeChange = (size) => {
+  queryParams.limit = size
+  queryParams.page = 1
+  getList()
+}
+
 const getList = async () => {
   loading.value = true
   try {
-    const res = await getIssues(queryParams)
-    issueList.value = res
-    total.value = res.length
+    const res = await getIssues({
+      skip: (queryParams.page - 1) * queryParams.limit,
+      limit: queryParams.limit,
+      status: queryParams.status || undefined,
+      severity: queryParams.severity || undefined,
+      project_name: queryParams.project_name || undefined
+    })
+    issueList.value = res.items || res
+    total.value = res.total || (res.items || res).length
   } catch (error) {
     ElMessage.error('获取问题列表失败')
   } finally {
@@ -623,9 +669,12 @@ const handleDialogClose = () => formRef.value?.resetFields()
 // ── 导出整改回复 ────────────────────────────────────────────────────────────
 
 const openExportReplyDialog = () => {
-  // 预填项目名称：当前筛选下若只有一种项目名则自动填入
-  replyForm.project_responsible = ''  // 只清空责任人''
-  replyForm.reply_date = ''
+  replyForm.project_name = ''
+  replyForm.project_responsible = ''
+  replyForm.reply_date = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}年${String(d.getMonth()+1).padStart(2,'0')}月${String(d.getDate()).padStart(2,'0')}日`
+  })()
   replyForm.issue_ids = []
   replyDialogVisible.value = true
 }
@@ -637,7 +686,7 @@ const doExportReply = async () => {
   }
   try {
     ElMessage.info('正在导出整改回复，请稍候...')
-    const { project_name, ...data } = replyForm  // 不传project_name，后端自动取
+    const data = { ...replyForm }  // 包含 project_name
     if (!data.reply_date) {
       const now = new Date()
       data.reply_date = `${now.getFullYear()}年${String(now.getMonth() + 1).padStart(2, '0')}月${String(now.getDate()).padStart(2, '0')}日`
@@ -654,6 +703,38 @@ const doExportReply = async () => {
     ElMessage.success('导出成功')
   } catch (error) {
     ElMessage.error('导出整改回复失败：' + (error.message || '未知错误'))
+  }
+}
+
+// ── 导出检查记录（台账）───────────────────────────────────────────────────
+const doExportLedger = async () => {
+  try {
+    ElMessage.info('正在导出检查记录，请稍候...')
+    const params = new URLSearchParams({
+      status: queryParams.status || '',
+      severity: queryParams.severity || '',
+      project_name: queryParams.project_name || ''
+    })
+    const res = await fetch(`/api/export/excel?${params.toString()}`, {
+      method: 'GET'
+    })
+    if (!res.ok) {
+      let msg = `服务器错误 [${res.status}]`
+      if (res.status === 404) msg = '没有可导出的问题（请检查筛选条件）'
+      if (res.status === 422) msg = '参数错误，请刷新页面重试'
+      ElMessage.error('导出失败：' + msg)
+      return
+    }
+    const blob = await res.blob()
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `隐患检查表_${Date.now()}.xlsx`
+    link.click()
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch (error) {
+    ElMessage.error('导出失败：' + (error.message || '网络错误'))
   }
 }
 

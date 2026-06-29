@@ -42,6 +42,7 @@
             <el-button type="primary" @click="handleAdd"><el-icon><Plus /></el-icon> 新增问题</el-button>
             <el-button type="info" @click="openImportDialog"><el-icon><Upload /></el-icon> 导入问题清单</el-button>
             <el-button type="warning" @click="openExportReplyDialog"><el-icon><Document /></el-icon> 导出整改回复</el-button>
+            <el-button type="success" @click="openExportLedgerDialog"><el-icon><List /></el-icon> 导出检查记录</el-button>
             <el-button plain @click="templateDialogVisible = true"><el-icon><Setting /></el-icon> 模板管理</el-button>
           </div>
         </el-card>
@@ -59,6 +60,20 @@
                   📁 {{ group.project_name || '未分类' }}
                   <el-tag size="small" type="info" style="margin-left: 8px">{{ group.issues.length }} 个隐患</el-tag>
                 </span>
+                <el-button
+                  link type="warning" size="small"
+                  style="float: right; margin-left: 12px"
+                  @click.stop="handleExportProjectReply(group.project_name)"
+                >
+                  <el-icon><Document /></el-icon> 导出本项目整改回复
+                </el-button>
+                <el-button
+                  link type="danger" size="small"
+                  style="float: right; margin-left: 12px"
+                  @click.stop="handleDeleteProject(group.project_name || '__EMPTY__')"
+                >
+                  <el-icon><Delete /></el-icon> 删除项目
+                </el-button>
               </template>
 
               <el-table :data="group.issues" border stripe size="small" @row-click="handleView">
@@ -133,7 +148,7 @@
             <el-option label="严重" value="严重" />
           </el-select>
         </el-form-item>
-        <el-form-item label="责任人">
+        <el-form-item label="责任人" prop="responsible_person">
           <el-input v-model="formData.responsible_person" placeholder="请输入责任人" />
         </el-form-item>
         <el-form-item label="整改期限">
@@ -220,8 +235,9 @@
         <el-table :data="importPreview.items" border size="small" max-height="300">
           <el-table-column type="selection" width="45" />
           <el-table-column type="index" label="#" width="45" />
-          <el-table-column prop="content" label="隐患描述" min-width="300" show-overflow-tooltip />
-          <el-table-column label="位置" width="120">
+          <el-table-column prop="project_name" label="项目" width="140" show-overflow-tooltip />
+          <el-table-column prop="title" label="隐患描述" min-width="280" show-overflow-tooltip />
+          <el-table-column label="位置" width="100">
             <template #default="{ row }">{{ row.location || '-' }}</template>
           </el-table-column>
         </el-table>
@@ -246,8 +262,9 @@
             <el-option v-for="p in projectList" :key="p" :label="p" :value="p" />
           </el-select>
         </el-form-item>
-        <el-form-item label="项目负责人">
-          <el-input v-model="replyForm.project_responsible" placeholder="姓名 电话" />
+        <el-form-item label="项目负责人" required :error="!replyForm.project_responsible ? '请填写项目负责人' : ''">
+          <el-input v-model="replyForm.project_responsible" placeholder="姓名 电话（必填）" />
+          <div v-if="!replyForm.project_responsible" style="color: #F56C6C; font-size: 12px; margin-top: 4px">请填写项目负责人</div>
         </el-form-item>
         <el-form-item label="回复日期">
           <el-date-picker v-model="replyForm.reply_date" type="date" placeholder="选择日期" format="YYYY-MM-DD" value-format="YYYY-MM-DD" style="width: 100%" />
@@ -256,6 +273,24 @@
       <template #footer>
         <el-button @click="exportReplyVisible = false">取消</el-button>
         <el-button type="warning" :loading="exportingReply" @click="doExportReply">生成整改回复报告</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 导出检查记录对话框 -->
+    <el-dialog v-model="exportLedgerVisible" title="导出检查记录（台账）" width="500px">
+      <el-form :model="ledgerForm" label-width="100px">
+        <el-form-item label="年份">
+          <el-select v-model="ledgerForm.year" placeholder="选择年份" style="width: 100%">
+            <el-option v-for="y in yearOptions" :key="y" :label="y + '年'" :value="y" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="检查内容">
+          <el-input v-model="ledgerForm.check_content" placeholder="例如：日常检查、集团检查" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="exportLedgerVisible = false">取消</el-button>
+        <el-button type="success" :loading="exportingLedger" @click="doExportLedger">导出台账</el-button>
       </template>
     </el-dialog>
 
@@ -313,7 +348,7 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 
-const API_BASE = 'http://192.168.31.105:9999'
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:9999'
 
 // ── 状态 ──
 const loading = ref(false)
@@ -364,13 +399,26 @@ const formData = reactive({
 })
 
 const formRules = {
-  title: [{ required: true, message: '请输入问题标题', trigger: 'blur' }]
+  title: [{ required: true, message: '请输入问题标题', trigger: 'blur' }],
+  responsible_person: [{ required: true, message: '请输入责任人', trigger: 'blur' }]
 }
 
 const replyForm = reactive({
   project_name: '',
   project_responsible: '',
   reply_date: ''
+})
+
+// 检查记录台账导出
+const exportLedgerVisible = ref(false)
+const exportingLedger = ref(false)
+const ledgerForm = reactive({
+  year: new Date().getFullYear(),
+  check_content: '日常检查'
+})
+const yearOptions = computed(() => {
+  const current = new Date().getFullYear()
+  return [current, current - 1, current - 2]
 })
 
 const templateForm = reactive({
@@ -487,6 +535,23 @@ const handleDelete = async (row) => {
   } catch (e) { if (e !== 'cancel') ElMessage.error('删除失败') }
 }
 
+const handleDeleteProject = async (projectName) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除项目「${projectName}」下的所有隐患？`,
+      '提示',
+      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' }
+    )
+    const res = await axios.delete(`${API_BASE}/api/issues/batch/delete`, {
+      params: { project_name: projectName }
+    })
+    ElMessage.success(res.data?.message || '删除成功')
+    loadData(); loadProjects()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('删除失败')
+  }
+}
+
 const submitForm = async () => {
   if (!formRef.value) return
   formRef.value.validate(async (valid) => {
@@ -581,7 +646,23 @@ const doImportWord = async () => {
 // ── 导出整改回复 ──
 const openExportReplyDialog = () => { exportReplyVisible.value = true; loadProjects() }
 
+// ── 导出检查记录 ──
+const openExportLedgerDialog = () => {
+  exportLedgerVisible.value = true
+  ledgerForm.year = new Date().getFullYear()
+  ledgerForm.check_content = '日常检查'
+}
+
+const handleExportProjectReply = (projectName) => {
+  if (!projectName || projectName === '__EMPTY__') { ElMessage.warning('请先为该项目设置名称'); return }
+  replyForm.project_name = projectName
+  replyForm.project_responsible = ''
+  replyForm.reply_date = ''
+  exportReplyVisible.value = true
+}
+
 const doExportReply = async () => {
+  if (!replyForm.project_responsible) { ElMessage.warning('请填写项目负责人'); return }
   if (!replyForm.reply_date) { ElMessage.warning('请选择回复日期'); return }
   exportingReply.value = true
   try {
@@ -599,6 +680,28 @@ const doExportReply = async () => {
     exportReplyVisible.value = false
   } catch (e) { ElMessage.error('导出失败') }
   finally { exportingReply.value = false }
+}
+
+// ── 导出检查记录（台账） ──
+const doExportLedger = async () => {
+  if (!ledgerForm.year) { ElMessage.warning('请选择年份'); return }
+  exportingLedger.value = true
+  try {
+    const res = await axios.post(`${API_BASE}/api/export/ledger`, {
+      year: ledgerForm.year,
+      check_content: ledgerForm.check_content || '日常检查'
+    }, {
+      responseType: 'blob'
+    })
+    const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `检查记录台账_${ledgerForm.year}年.xlsx`; a.click()
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+    exportLedgerVisible.value = false
+  } catch (e) { ElMessage.error('导出失败')
+  } finally { exportingLedger.value = false }
 }
 
 // ── 模板管理 ──

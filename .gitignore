@@ -3,7 +3,32 @@ deploy.py
 deploy2.py
 deploy_nas.py
 deploy_nas2.py
+deploy_backend.py
+deploy_simple.py
+deploy_to_nas.sh
+deploy_to_nas_custom.sh
+update_nas.sh
+update_nas.py
+upload_all.sh
+upload_to_nas.py
+upload_and_check.py
+upload_and_restart.py
+restart_backend.py
+nas_check.py
+nas_check2.py
+nas_diag.py
+nas_rebuild.py
+nas_deploy_guide.sh
+check_*.py
+fix_*.py
+view_export.py
+analyze_template.py
 test_ssh.py
+
+# 构建产物
+*.spec
+*.exe
+windows-client-package/
 
 # macOS
 .DS_Store

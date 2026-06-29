@@ -15,9 +15,9 @@ from app.utils import save_upload_file
 
 router = APIRouter(prefix="/api/issues", tags=["问题管理"])
 
-@router.get("/", response_model=List[IssueResponse])
+@router.get("/")
 def get_issues(
-    skip: int = 0,
+    page: int = 1,
     limit: int = 100,
     status: Optional[str] = None,
     severity: Optional[str] = None,
@@ -33,8 +33,10 @@ def get_issues(
     if project_name:
         query = query.filter(SafetyIssue.project_name == project_name)
 
+    total = query.count()
+    skip = (page - 1) * limit
     issues = query.order_by(SafetyIssue.id.asc()).offset(skip).limit(limit).all()
-    return [issue.to_dict() for issue in issues]
+    return {"items": [issue.to_dict() for issue in issues], "total": total}
 
 
 @router.get("/projects/list")
@@ -129,6 +131,54 @@ def delete_issue(issue_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "删除成功"}
 
+
+@router.delete("/batch/delete")
+def batch_delete_issues(
+    project_name: Optional[str] = None,
+    issue_ids: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """批量删除：按项目名删除 或 按 ID 列表删除"""
+    query = db.query(SafetyIssue)
+    
+    if project_name:
+        # "未分类" 特别处理：匹配 NULL/空字符串
+        if project_name in ('未分类', '__EMPTY__'):
+            from sqlalchemy import or_
+            query = query.filter(or_(
+                SafetyIssue.project_name.is_(None),
+                SafetyIssue.project_name == '',
+                SafetyIssue.project_name == '未分类'
+            ))
+        else:
+            query = query.filter(SafetyIssue.project_name == project_name)
+    
+    if issue_ids:
+        ids = []
+        for sid in issue_ids.split(','):
+            try:
+                ids.append(int(sid.strip()))
+            except ValueError:
+                pass
+        if ids:
+            query = query.filter(SafetyIssue.id.in_(ids))
+    
+    issues = query.all()
+    if not issues:
+        raise HTTPException(status_code=404, detail="没有可删除的问题")
+    
+    deleted_count = 0
+    for issue in issues:
+        for photo in issue.photos:
+            if os.path.exists(photo.file_path):
+                os.remove(photo.file_path)
+        db.delete(issue)
+        deleted_count += 1
+    
+    db.commit()
+    return {"message": f"成功删除 {deleted_count} 条问题", "deleted_count": deleted_count}
+
+
 @router.post("/{issue_id}/photos", response_model=IssueResponse)
 async def upload_photo(
     issue_id: int,
@@ -184,7 +234,28 @@ def parse_deadline(deadline_str):
         return date(year, month, day)
     return None
 
+def extract_images_from_cell(cell, issue_id):
+    """从表格单元格中提取图片（精确匹配）"""
+    images = []
+    try:
+        from lxml import etree
+        cell_xml = cell._element
+        # 查找所有图片关系 ID
+        for blip in cell_xml.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}blip"):
+            embed = blip.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+            if embed and embed in cell.part.rels:
+                rel = cell.part.rels[embed]
+                image_part = rel.target_part
+                image_data = image_part.blob
+                file_ext = os.path.splitext(rel.target_ref)[1] or '.png'
+                file_name = f"{issue_id}_{len(images) + 1}{file_ext}"
+                images.append((file_name, image_data))
+    except Exception as e:
+        pass
+    return images
+
 def extract_images_from_doc(doc, issue_id):
+    """旧版：从文档全局提取图片（备用）"""
     images = []
     for rel in doc.part.rels.values():
         if "image" in rel.target_ref:
@@ -203,23 +274,163 @@ async def preview_from_word(file: UploadFile = File(...)):
         contents = await file.read()
         doc = Document(io.BytesIO(contents))
 
-        # 项目名称 = 企业名称栏的值，取"企业名称："后到"隐患条数/检查时间"之间的完整文本
-        project_name = ""
-        for paragraph in doc.paragraphs:
-            text = paragraph.text.strip()
-            if not text:
-                continue
-            if "企业名称" in text:
-                val = re.search(r'企业名称[：:]\s+(.+?)(?:\s{2,}隐患|\s{2,}检查|$)', text, re.DOTALL)
-                if val:
-                    project_name = val.group(1).strip()
-            if "项目名称" in text and not project_name:
-                val = re.search(r'项目名称[：:]\s+(.+?)(?:\s{2,}隐患|\s{2,}检查|$)', text, re.DOTALL)
-                if val:
-                    project_name = val.group(1).strip()
+        result = _parse_word_doc(doc)
 
+        # 展平为 items 列表（带 project_name 字段）
         items = []
-        for table in doc.tables:
+        for project_name, issues in result:
+            for issue in issues:
+                issue["project_name"] = project_name
+                items.append(issue)
+
+        all_projects = [pn for pn, _ in result]
+        first_project = all_projects[0] if all_projects else ""
+
+        return {
+            "success": True,
+            "project_name": first_project,
+            "project_list": all_projects,
+            "items": items,
+            "tables_found": len(doc.tables),
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@router.post("/import-from-word")
+async def import_from_word(
+    file: UploadFile = File(...),
+    skip_indices: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    try:
+        from docx import Document
+
+        contents = await file.read()
+        doc = Document(io.BytesIO(contents))
+
+        result = _parse_word_doc(doc)
+
+        # 解析要跳过的行索引
+        skip_set = set()
+        if skip_indices:
+            for idx_str in skip_indices.split(','):
+                try:
+                    skip_set.add(int(idx_str.strip()))
+                except ValueError:
+                    pass
+
+        imported_count = 0
+        errors = []
+
+        for project_name, issues in result:
+            for issue_dict in issues:
+                skip_key = f"{project_name}_{issue_dict['title'][:30]}"
+                if skip_key in skip_set:
+                    continue
+                try:
+                    db_issue = SafetyIssue(
+                        project_name=project_name or None,
+                        title=issue_dict['title'][:200],
+                        description=issue_dict.get('description', '')[:500],
+                        location='',
+                        severity='一般',
+                        deadline=issue_dict.get('deadline'),
+                        status='待整改',
+                        notes=issue_dict.get('notes', '')[:500],
+                        responsible_person='',
+                    )
+                    db.add(db_issue)
+                    db.commit()
+                    db.refresh(db_issue)
+
+                    # 从该行的 cells[1]（现场图片列）提取图片 —— 精确匹配
+                    try:
+                        tbl_idx = issue_dict.get('_table_idx', 0)
+                        row_idx = issue_dict.get('_row_idx', 0)
+                        if tbl_idx < len(doc.tables):
+                            table = doc.tables[tbl_idx]
+                            if row_idx < len(table.rows):
+                                row = table.rows[row_idx]
+                                cells = row.cells
+                                if len(cells) >= 2:
+                                    cell_b = cells[1]  # 现场图片列
+                                    images = extract_images_from_cell(cell_b, db_issue.id)
+                                    for file_name, image_data in images:
+                                        photos_dir = os.path.join("data", "photos", str(db_issue.id))
+                                        os.makedirs(photos_dir, exist_ok=True)
+                                        file_path = os.path.join(photos_dir, file_name)
+                                        with open(file_path, "wb") as f:
+                                            f.write(image_data)
+                                        db_photo = Photo(
+                                            issue_id=db_issue.id,
+                                            photo_type="问题照片",
+                                            file_path=file_path,
+                                            file_name=file_name
+                                        )
+                                        db.add(db_photo)
+                    except Exception as img_e:
+                        errors.append(f"图片提取失败: {str(img_e)}")
+
+                    imported_count += 1
+                except Exception as e:
+                    db.rollback()
+                    errors.append(str(e))
+
+        db.commit()
+
+        all_projects = [pn for pn, _ in result]
+        return {
+            'success': True,
+            'imported_count': imported_count,
+            'errors': errors,
+            'project_name': all_projects[0] if all_projects else "",
+            'project_list': all_projects,
+            'tables_found': len(doc.tables),
+        }
+    except Exception as e:
+        return {'success': False, 'message': str(e)}
+
+
+def _parse_word_doc(doc):
+    """
+    按文档 XML 顺序遍历 body 子元素：
+    - 遇到 <w:p>：检测「企业名称」/「项目名称」，更新 current_project
+    - 遇到 <w:tbl>：取 doc.tables[table_cursor]，分配 current_project
+    返回 [ (project_name, [{"title":..., "description":..., "notes":..., "deadline":...}]) ]
+    """
+    current_project = ""
+    table_cursor = 0
+    result = []   # [(project_name, [issue_dicts])]
+    current_issues = []
+
+    body = doc.element.body
+    for child in body:
+        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+
+        if tag == 'p':   # 段落
+            texts = [node.text for node in child.iter() if node.text and node.text.strip()]
+            text = ' '.join(texts)
+            for prefix in ["企业名称", "项目名称"]:
+                if prefix in text:
+                    val = re.search(
+                        r'' + prefix + r'[：:]\s+(.+?)(?:\s{2,}隐患|\s{2,}检查|$)',
+                        text, re.DOTALL
+                    )
+                    if val:
+                        # 遇到新项目：先把当前项目的 issues 存起来
+                        if current_issues:
+                            result.append((current_project, current_issues))
+                        current_project = val.group(1).strip()
+                        current_issues = []
+                        break
+
+        elif tag == 'tbl':   # 表格
+            if table_cursor >= len(doc.tables):
+                break
+            table = doc.tables[table_cursor]
+            table_cursor += 1
+
             for row_idx, row in enumerate(table.rows):
                 if row_idx == 0:
                     continue
@@ -233,187 +444,16 @@ async def preview_from_word(file: UploadFile = File(...)):
                 deadline = parse_deadline(remarks) if remarks else None
                 if not title:
                     continue
-                items.append({
-                    "title": title[:200],
-                    "description": description[:500] if description else None,
-                    "notes": notes[:500] if notes else None,
-                    "deadline": deadline.isoformat() if deadline else None,
+                current_issues.append({
+                    "title": title,
+                    "description": description,
+                    "notes": notes,
+                    "deadline": deadline,
+                    "_table_idx": table_cursor - 1,
+                    "_row_idx": row_idx,
                 })
 
-        return {
-            "success": True,
-            "project_name": project_name,
-            "items": items,
-            "tables_found": len(doc.tables),
-        }
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-
-
-@router.post("/import-from-word")
-async def import_from_word(
-    file: UploadFile = File(...),
-    project_name: Optional[str] = Form(None),
-    skip_indices: Optional[str] = Form(None),  # 逗号分隔的行索引，跳过这些行不导入
-    db: Session = Depends(get_db)
-):
-    try:
-        from docx import Document
-        
-        contents = await file.read()
-        doc = Document(io.BytesIO(contents))
-        
-        imported_count = 0
-        errors = []
-        detected_project_name = ""
-        
-        debug_info = []
-        
-        # 项目名称 = 企业名称栏的值，取"企业名称："后到"隐患条数/检查时间"之间的完整文本
-        for paragraph in doc.paragraphs:
-            text = paragraph.text.strip()
-            if text:
-                debug_info.append(f"段落: {text[:100]}")
-            if "企业名称" in text and not detected_project_name:
-                val = re.search(r'企业名称[：:]\s+(.+?)(?:\s{2,}隐患|\s{2,}检查|$)', text, re.DOTALL)
-                if val:
-                    detected_project_name = val.group(1).strip()
-            if "项目名称" in text and not detected_project_name:
-                val = re.search(r'项目名称[：:]\s+(.+?)(?:\s{2,}隐患|\s{2,}检查|$)', text, re.DOTALL)
-                if val:
-                    detected_project_name = val.group(1).strip()
-        
-        # 优先用前端传的 project_name（用户在预览框里可能改过），否则用文档里识别到的
-        final_project_name = (project_name or detected_project_name or "").strip()
-        
-        debug_info.append(f"项目名称: {final_project_name}")
-        debug_info.append(f"表格数量: {len(doc.tables)}")
-        
-        all_images = extract_images_from_doc(doc, 0)
-        debug_info.append(f"文档中提取到图片数量: {len(all_images)}")
-        
-        image_idx = 0
-        
-        # 解析要跳过的行索引
-        skip_set = set()
-        if skip_indices:
-            for idx_str in skip_indices.split(','):
-                try:
-                    skip_set.add(int(idx_str.strip()))
-                except ValueError:
-                    pass
-
-        for table_idx, table in enumerate(doc.tables):
-            debug_info.append(f"表格{table_idx}: {len(table.rows)}行 x {len(table.columns)}列")
-            for row_idx, row in enumerate(table.rows):
-                cells = row.cells
-                row_texts = []
-                for cell_idx, cell in enumerate(cells):
-                    cell_text = cell.text.strip()
-                    row_texts.append(f"[{cell_idx}]={cell_text[:50]}")
-                debug_info.append(f"  行{row_idx}: {', '.join(row_texts)}")
-                
-                if row_idx == 0:
-                    continue
-
-                # 计算全局行索引
-                global_row_idx = (table_idx * 1000) + row_idx
-                if skip_set and global_row_idx in skip_set:
-                    debug_info.append(f"  跳过（用户在预览中已删除）")
-                    continue
-                
-                try:
-                    title = ""
-                    description = ""
-                    notes = ""
-                    deadline = None
-                    
-                    debug_info.append(f"  cells长度: {len(cells)}")
-                    
-                    # 表格列对应关系（标准隐患检查表模板）：
-                    # cells[0]=序号, cells[1]=现场图片, cells[2]=检查发现的主要隐患或问题(title),
-                    # cells[3]=法规名称/代码/条款号(description), cells[4]=整改措施或建议(notes),
-                    # cells[5]=备注(内含"整改时限：X月X日"，用于解析 deadline)
-                    if len(cells) >= 3:
-                        title = cells[2].text.strip()
-                        debug_info.append(f"  title值: '{title}'")
-                    if len(cells) >= 4:
-                        description = cells[3].text.strip()
-                    if len(cells) >= 5:
-                        notes = cells[4].text.strip()
-                    if len(cells) >= 6:
-                        remarks = cells[5].text.strip()
-                        deadline = parse_deadline(remarks)
-                        debug_info.append(f"  deadline值: {deadline}, remarks: '{remarks[:60]}'")
-                    
-                    if not title:
-                        debug_info.append(f"  title为空，尝试查找")
-                        for cell in cells:
-                            cell_text = cell.text.strip()
-                            if cell_text and len(cell_text) > 2:
-                                title = cell_text
-                                debug_info.append(f"  找到title: '{title}'")
-                                break
-                    
-                    if title:
-                        issue_data = {
-                            'title': title[:200],
-                            'description': description[:500] if description else None,
-                            'location': '',
-                            'severity': '一般',
-                            'deadline': deadline,
-                            'project_name': final_project_name,
-                            'responsible_person': '',
-                            'status': '待整改',
-                            'notes': notes[:500] if notes else None
-                        }
-                        
-                        try:
-                            db_issue = SafetyIssue(**issue_data)
-                            db.add(db_issue)
-                            db.commit()
-                            db.refresh(db_issue)
-                            
-                            if image_idx < len(all_images):
-                                file_name, image_data = all_images[image_idx]
-                                photos_dir = os.path.join("data", "photos", str(db_issue.id))
-                                os.makedirs(photos_dir, exist_ok=True)
-                                file_path = os.path.join(photos_dir, file_name)
-                                with open(file_path, "wb") as f:
-                                    f.write(image_data)
-                                db_photo = Photo(
-                                    issue_id=db_issue.id,
-                                    photo_type="问题照片",
-                                    file_path=file_path,
-                                    file_name=file_name
-                                )
-                                db.add(db_photo)
-                                debug_info.append(f"  -> 关联图片: {file_name}")
-                                image_idx += 1
-                            
-                            imported_count += 1
-                            debug_info.append(f"  -> 成功导入: {title[:50]}")
-                        except Exception as db_err:
-                            db.rollback()
-                            debug_info.append(f"  -> 数据库错误: {str(db_err)}")
-                            errors.append(f"第{row_idx}行数据库错误: {str(db_err)}")
-                    else:
-                        debug_info.append(f"  -> 跳过（无标题）")
-                except Exception as e:
-                    errors.append(f"第{row_idx}行导入失败: {str(e)}")
-                    debug_info.append(f"  -> 错误: {str(e)}")
-        
-        db.commit()
-        
-        return {
-            'success': True,
-            'imported_count': imported_count,
-            'errors': errors,
-            'project_name': final_project_name,
-            'tables_found': len(doc.tables),
-            'paragraphs_count': len(doc.paragraphs),
-            'images_found': len(all_images),
-            'debug': debug_info[:100]
-        }
-    except Exception as e:
-        return {'success': False, 'message': str(e)}
+    # 最后一个项目
+    if current_issues:
+        result.append((current_project, current_issues))
+    return result

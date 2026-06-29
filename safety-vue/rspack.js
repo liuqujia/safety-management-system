@@ -17,7 +17,7 @@ const config = require(configPath)
 const mode = process.argv[2] === 'build' ? 'production' : 'development'
 
 // 增加archiver依赖用于创建压缩包
-const archiver = require('archiver')
+const { ZipArchive } = require('archiver')
 const { promisify } = require('util')
 const pipeline = promisify(require('stream').pipeline)
 
@@ -171,7 +171,7 @@ async function createArchive() {
     // 创建写入流
     const output = fs.createWriteStream(archivePath)
     // 创建archiver实例
-    const archive = archiver('zip', {
+    const archive = new ZipArchive({
       zlib: { level: 9 } // 设置压缩级别
     })
     

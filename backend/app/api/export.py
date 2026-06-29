@@ -12,6 +12,7 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
+
 from app.database import get_db
 from app.models import SafetyIssue, ExportTemplate
 from app.schemas import TemplateCreate, TemplateUpdate, TemplateResponse
@@ -119,27 +120,31 @@ def delete_template(template_id: int, db: Session = Depends(get_db)):
 #  导出 Excel（隐患检查表）
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.get("/excel")
-def export_to_excel(
-    status: str = None,
-    severity: str = None,
-    template_id: int = 1,
+@router.post("/ledger")
+def export_ledger(
+    body: dict,
     db: Session = Depends(get_db)
 ):
     """
-    按隐患检查表模板导出 Excel。
-    模板字段与 /api/export/templates 中 id=1（隐患检查表）对齐。
+    导出检查记录（台账），按年份过滤。
+    请求体：{ "year": "2026", "check_content": "日常检查" }
     """
+    year = body.get("year")
+    check_content = body.get("check_content", "日常检查")
+    
     query = db.query(SafetyIssue)
-    if status:
-        query = query.filter(SafetyIssue.status == status)
-    if severity:
-        query = query.filter(SafetyIssue.severity == severity)
-
+    if year:
+        query = query.filter(SafetyIssue.create_time.like(f"{year}%"))
+    
     issues = query.order_by(SafetyIssue.create_time.desc()).all()
     if not issues:
         raise HTTPException(status_code=404, detail="没有可导出的问题")
+    
+    return _export_excel_internal(issues, check_content)
 
+
+def _export_excel_internal(issues, check_content="日常检查"):
+    """内部函数：根据实际issues生成Excel"""
     wb = Workbook()
     ws = wb.active
     ws.title = "隐患检查表"
@@ -231,6 +236,33 @@ def export_to_excel(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+@router.get("/excel")
+def export_to_excel(
+    status: Optional[str] = None,
+    severity: Optional[str] = None,
+    project_name: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    按隐患检查表模板导出 Excel。
+    模板字段与 /api/export/templates 中 id=1（隐患检查表）对齐。
+    """
+    query = db.query(SafetyIssue)
+    if status:
+        query = query.filter(SafetyIssue.status == status)
+    if severity:
+        query = query.filter(SafetyIssue.severity == severity)
+    if project_name:
+        query = query.filter(SafetyIssue.project_name.like(f"%{project_name}%"))
+
+    issues = query.order_by(SafetyIssue.create_time.desc()).all()
+    if not issues:
+        raise HTTPException(status_code=404, detail="没有可导出的问题")
+    
+    return _export_excel_internal(issues)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -349,6 +381,8 @@ def export_rectification_reply(
     列宽：A=14.875, B=9.625, C=25.625, D=9.625, E=25.625
     """
     query = db.query(SafetyIssue)
+    if request.project_name and request.project_name.strip():
+        query = query.filter(SafetyIssue.project_name == request.project_name.strip())
     if request.issue_ids:
         query = query.filter(SafetyIssue.id.in_(request.issue_ids))
     issues = query.order_by(SafetyIssue.create_time.desc()).all()
@@ -452,20 +486,21 @@ def export_rectification_reply(
         ws.row_dimensions[current_row].height = 22
         current_row += 1
 
-        # 行 D-E：照片（合并 B:D / D:E 各两行），标签在左上角
+        # ── 照片区域：B{row}:C{row+1} 合并 / D{row}:E{row+1} 合并，标签在顶行，照片在第二行 ──
         ws.merge_cells(f'B{current_row}:C{current_row + 1}')
         ws.merge_cells(f'D{current_row}:E{current_row + 1}')
-        # A列已合并（整改事项回复），跳过避免操作 MergedCell
+        # 先合并且给所有单元格加边框（openpyxl 允许对合并的单元格设边框）
         for col in range(2, 6):
             ws.cell(row=current_row, column=col).border = thin_border
             ws.cell(row=current_row + 1, column=col).border = thin_border
-        # 标签写在左上角（top-left）
+        # 标签写在合并区域第一行（左上角）
         cell_b = ws.cell(row=current_row, column=2, value="整改前照片：")
         cell_b.font = header_font
         cell_b.alignment = top_left_alignment
         cell_d = ws.cell(row=current_row, column=4, value="整改后照片：")
         cell_d.font = header_font
         cell_d.alignment = top_left_alignment
+        ws.row_dimensions[current_row].height = 22
 
         issue_photos = [p for p in issue.photos if p.photo_type == "问题照片"]
         rect_photos = [p for p in issue.photos if p.photo_type == "整改照片"]
@@ -476,7 +511,8 @@ def export_rectification_reply(
                     img = XLImage(issue_photos[0].file_path)
                     img.width = 150
                     img.height = 120
-                    ws.add_image(img, f'B{current_row}')
+                    # 照片放在第二行，避免遮挡标签文字
+                    ws.add_image(img, f'B{current_row + 1}')
             except Exception:
                 pass
 
@@ -486,12 +522,11 @@ def export_rectification_reply(
                     img = XLImage(rect_photos[0].file_path)
                     img.width = 150
                     img.height = 120
-                    ws.add_image(img, f'D{current_row}')
+                    ws.add_image(img, f'D{current_row + 1}')
             except Exception:
                 pass
 
-        ws.row_dimensions[current_row].height = 22
-        ws.row_dimensions[current_row + 1].height = 106
+        ws.row_dimensions[current_row + 1].height = 120
         current_row += 2
 
     # ── 最后：回复日期 ────────────────────────────────────────────────────────
@@ -600,35 +635,41 @@ def export_rectification_report(
         rect_photos = [p for p in issue.photos if p.photo_type == "整改照片"]
         photo_height = 150
 
-        for photo_idx in range(max(len(issue_photos), len(rect_photos), 1)):
-            c1 = ws.cell(row=current_row, column=1, value="整改前照片：")
-            c1.font = header_font
-            c1.alignment = top_left_alignment
-            c2 = ws.cell(row=current_row, column=2, value="整改后照片：")
-            c2.font = header_font
-            c2.alignment = top_left_alignment
-            if photo_idx < len(issue_photos):
-                try:
-                    if os.path.exists(issue_photos[photo_idx].file_path):
-                        img = XLImage(issue_photos[photo_idx].file_path)
-                        img.width = 200
-                        img.height = 150
-                        ws.add_image(img, f'A{current_row}')
-                except Exception:
-                    pass
-            if photo_idx < len(rect_photos):
-                try:
-                    if os.path.exists(rect_photos[photo_idx].file_path):
-                        img = XLImage(rect_photos[photo_idx].file_path)
-                        img.width = 200
-                        img.height = 150
-                        ws.add_image(img, f'B{current_row}')
-                except Exception:
-                    pass
-            ws.row_dimensions[current_row].height = photo_height
-            for col in range(1, 3):
-                ws.cell(row=current_row, column=col).border = thin_border
-            current_row += 1
+        # 标签行
+        c1 = ws.cell(row=current_row, column=1, value="整改前照片：")
+        c1.font = header_font
+        c1.alignment = top_left_alignment
+        c2 = ws.cell(row=current_row, column=2, value="整改后照片：")
+        c2.font = header_font
+        c2.alignment = top_left_alignment
+        for col in range(1, 3):
+            ws.cell(row=current_row, column=col).border = thin_border
+        ws.row_dimensions[current_row].height = 22
+        current_row += 1
+
+        # 照片行（下一行，不遮挡标签）
+        if issue_photos:
+            try:
+                if os.path.exists(issue_photos[0].file_path):
+                    img = XLImage(issue_photos[0].file_path)
+                    img.width = 200
+                    img.height = 150
+                    ws.add_image(img, f'A{current_row}')
+            except Exception:
+                pass
+        if rect_photos:
+            try:
+                if os.path.exists(rect_photos[0].file_path):
+                    img = XLImage(rect_photos[0].file_path)
+                    img.width = 200
+                    img.height = 150
+                    ws.add_image(img, f'B{current_row}')
+            except Exception:
+                pass
+        ws.row_dimensions[current_row].height = photo_height
+        for col in range(1, 3):
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
 
         ws.merge_cells(f'A{current_row}:B{current_row}')
         ws.cell(row=current_row, column=1, value="整改事项回复")
