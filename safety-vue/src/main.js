@@ -11,8 +11,8 @@ import { printLayoutsInfo } from '@/utils/printInfo'
  * @description 生产环境默认都使用mock，如果正式用于生产环境时，记得去掉
  */
 
-// 检测环境变量或默认使用mock
-const useMock = process.env.VUE_APP_MOCK_ENABLE === 'true' || process.env.NODE_ENV === 'production'
+// 检测环境变量，生产环境不启用Mock（使用真实后端API）
+const useMock = process.env.VUE_APP_MOCK_ENABLE === 'true'
 if (useMock) {
   // 使用动态import替代require
   import('@/utils/static').then(({ mockXHR }) => {

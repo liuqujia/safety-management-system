@@ -306,10 +306,10 @@
       <div v-if="importPreview" class="import-preview">
         <el-form label-width="100px" v-loading="previewLoading">
           <el-form-item label="识别隐患数">
-            <el-tag type="success" size="large">{{ importPreview.items?.length || 0 }} 条</el-tag>
+            <el-tag type="success" size="large">{{ (importPreview.items ? importPreview.items.length : 0) }} 条</el-tag>
             <span v-if="importPreview.project_name" style="margin-left: 12px; color: #909399">项目：{{ importPreview.project_name }}</span>
           </el-form-item>
-          <el-form-item label="隐患预览" v-if="importPreview.items?.length">
+          <el-form-item label="隐患预览" v-if="importPreview.items && importPreview.items.length">
             <div style="margin-bottom: 8px; color: #909399; font-size: 12px">
               共 {{ importPreview.items.length }} 条，点 × 删除不需要的
             </div>
@@ -335,7 +335,7 @@
 
       <template #footer>
         <el-button @click="importDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="importing" :disabled="!selectedWordFile || !importPreview?.items?.length" @click="doImportWord">确认导入</el-button>
+        <el-button type="primary" :loading="importing" :disabled="!selectedWordFile || !(importPreview && importPreview.items && importPreview.items.length)" @click="doImportWord">确认导入</el-button>
       </template>
     </el-dialog>
   </div>

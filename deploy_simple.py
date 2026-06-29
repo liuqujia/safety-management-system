@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""简化版NAS部署脚本 - paramiko 无 PTY 版本"""
+"""简化版NAS部署脚本 - 跳过本地构建，直接上传预构建的dist"""
 import paramiko
 import os
 import sys
 import time
-import tarfile
-import io
 
 NAS_IP = "192.168.31.105"
 NAS_PORT = 22
@@ -15,7 +13,6 @@ NAS_BACKEND_PATH = "/vol2/1000/Docker/anquan/backend"
 BASE = "/Users/kirito/Downloads/12/111"
 
 def remote_exec(ssh_client, cmd_str, timeout=120):
-    """执行远程命令，无 PTY"""
     print(f"  → {cmd_str[:70]}...")
     stdin, stdout, stderr = ssh_client.exec_command(cmd_str, timeout=timeout)
     out = stdout.read().decode('utf-8', errors='replace')
@@ -24,86 +21,95 @@ def remote_exec(ssh_client, cmd_str, timeout=120):
         print(f"    ⚠ {err.strip()[:150]}")
     return out, err
 
-def upload_file(sftp, local_path, remote_path):
-    """上传单个文件"""
-    print(f"  ↑ {os.path.basename(local_path)} → {remote_path}")
-    sftp.put(local_path, remote_path)
+def upload_dir(sftp, local_dir, remote_dir):
+    remote_exec(ssh, f"mkdir -p {remote_dir}")
+    for item in os.listdir(local_dir):
+        local_item = os.path.join(local_dir, item)
+        remote_item = f"{remote_dir}/{item}"
+        if os.path.isfile(local_item):
+            try: sftp.stat(remote_item); sftp.remove(remote_item)
+            except: pass
+            sftp.put(local_item, remote_item)
+        elif os.path.isdir(local_item):
+            upload_dir(sftp, local_item, remote_item)
 
-def upload_dir(sftp, local_dir, remote_base):
-    """递归上传目录"""
-    for root, dirs, files in os.walk(local_dir):
-        rel = os.path.relpath(root, local_dir)
-        remote_dir = os.path.join(remote_base, rel) if rel != '.' else remote_base
-        try:
-            sftp.stat(remote_dir)
-        except:
-            sftp.mkdir(remote_dir)
-        for f in files:
-            local_fp = os.path.join(root, f)
-            remote_fp = os.path.join(remote_dir, f)
-            sftp.put(local_fp, remote_fp)
-
-# ── 连接 ─────────────────────────────────────────────────────────────────────
+# ── 连接 ──
 print("🔌 连接NAS...")
+ssh = paramiko.SSHClient()
+ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 try:
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(NAS_IP, port=NAS_PORT, username=NAS_USER, password=NAS_PASSWORD, timeout=15)
-    sftp = ssh.open_sftp()
-    print("  ✅ 连接成功\n")
+    ssh.connect(NAS_IP, port=NAS_PORT, username=NAS_USER, password=NAS_PASSWORD, timeout=10)
+    print(" ✅ 连接成功")
 except Exception as e:
-    print(f"  ❌ 连接失败: {e}")
+    print(f" ❌ 连接失败: {e}")
     sys.exit(1)
 
-# ── 1. 创建目录 ───────────────────────────────────────────────────────────────
-print("1/4 在NAS上创建目录...")
+sftp = ssh.open_sftp()
+
+# ── 1/3 上传 backend ──
+print("\n1/3 在NAS上创建目录...")
 remote_exec(ssh, f"mkdir -p {NAS_BACKEND_PATH}")
 remote_exec(ssh, "mkdir -p /vol1/1000/工作资料/安全资料/photos")
-print("")
 
-# ── 2. 上传 backend 代码 ─────────────────────────────────────────────────────
-print("2/4 上传 backend 代码...")
-t0 = time.time()
-upload_dir(sftp, f"{BASE}/backend", NAS_BACKEND_PATH)
-print(f"  ✅ 上传完成 ({(time.time()-t0):.0f}秒)\n")
+print("\n2/3 上传 backend 代码...")
+remote_exec(ssh, f"rm -rf {NAS_BACKEND_PATH}/*")
+local_backend = os.path.join(BASE, "backend")
+upload_dir(sftp, local_backend, NAS_BACKEND_PATH)
+print(" ✅ 上传完成")
 
-# ── 3. 重启 Docker ───────────────────────────────────────────────────────────
-print("3/4 重启后端 Docker（构建中，请等待1-2分钟）...")
-out, err = remote_exec(ssh,
-    f"cd {NAS_BACKEND_PATH} && docker compose down 2>/dev/null; docker compose up -d --build",
-    timeout=300
+# ── 3/3 上传前端dist + nginx配置 ──
+print("\n3/3 上传前端 dist + 重启服务...")
+DIST = os.path.join(BASE, "safety-vue", "dist")
+NAS_FE = "/vol2/1000/Docker/anquan/safety-vue"
+
+if not os.path.isdir(DIST):
+    print(f" ❌ dist 目录不存在: {DIST}")
+    print(f"   请在项目目录下运行: cd safety-vue && pnpm install && pnpm build")
+    sys.exit(1)
+
+dist_kb = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(DIST) for f in fs) // 1024
+print(f" 📦 预构建 dist ({dist_kb} KB)，上传到 NAS...")
+
+# 上传 dist/
+remote_exec(ssh, f"mkdir -p {NAS_FE}/dist")
+remote_exec(ssh, f"rm -rf {NAS_FE}/dist/*")
+for item in os.listdir(DIST):
+    local_item = os.path.join(DIST, item)
+    remote_item = f"{NAS_FE}/dist/{item}"
+    if os.path.isfile(local_item):
+        try: sftp.stat(remote_item); sftp.remove(remote_item)
+        except: pass
+        sftp.put(local_item, remote_item)
+    elif os.path.isdir(local_item):
+        upload_dir(sftp, local_item, remote_item)
+print(" ✅ dist 上传完成")
+
+# 上传 nginx/docker 配置
+for fname in ["docker-compose.yml", "fnos-nginx.conf"]:
+    local_f = os.path.join(BASE, "safety-vue", fname)
+    if os.path.isfile(local_f):
+        sftp.put(local_f, f"{NAS_FE}/{fname}")
+        print(f" ✅ {fname} 已上传")
+
+# 重启后端 Docker
+print("\n🔄 重启后端 Docker...")
+remote_exec(ssh,
+    f"cd {NAS_BACKEND_PATH} && docker compose down 2>/dev/null && docker compose up -d",
+    timeout=180
 )
-print("  Docker输出:", out.strip()[-300:] if out.strip() else "(无输出)")
-print("")
+print(" ✅ 后端已重启")
 
-# ── 4. 等待启动 ───────────────────────────────────────────────────────────────
-print("4/4 等待后端启动（30秒）...")
-time.sleep(30)
-
-# 检查状态
-out, _ = remote_exec(ssh, "docker ps --filter name=anquan --format '{{.Status}}'")
-print(f"  容器状态: {out.strip() or '未找到容器'}")
-
-# 测试接口
-out, _ = remote_exec(ssh,
-    "curl -s -X POST http://localhost:9999/api/issues/preview-from-word "
-    "-F 'file=@/dev/null' 2>&1 | head -c 200",
-    timeout=20
+# 重启前端 Docker
+print("🔄 重启前端 Docker...")
+remote_exec(ssh,
+    f"cd {NAS_FE} && docker compose down 2>/dev/null && docker compose up -d",
+    timeout=120
 )
-resp = out.strip()
-if "405" in resp or "not found" in resp.lower():
-    print(f"  ❌ 接口仍返回 405，说明代码未更新")
-elif resp:
-    print(f"  ✅ 接口响应: {resp[:150]}")
-else:
-    # 尝试本地
-    out2, _ = remote_exec(ssh, "curl -s http://localhost:9999/ 2>&1", timeout=10)
-    print(f"  API根: {out2.strip()[:100]}")
-print("")
+print(" ✅ 前端已重启")
 
 sftp.close()
 ssh.close()
-
-print("🎉 部署完成!")
-print("后端: http://192.168.31.105:9999")
-print("前端: http://192.168.31.105:8866")
+print("\n🎉 全部完成!")
+print("   前端: http://192.168.31.105:8866")
+print("   后端: http://192.168.31.105:9999")
+print("   API文档: http://192.168.31.105:9999/docs")

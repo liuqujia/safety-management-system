@@ -380,10 +380,13 @@ def export_rectification_reply(
 
     current_row = 1
 
+    # 把 "2026-06-29" 转成 "2026年6月29日"
+    formatted_date = request.reply_date.replace('-', '年', 1).replace('-', '月', 1) + '日'
+
     # ── 第1行：标题 ──────────────────────────────────────────────────────────
     ws.merge_cells(f'A{current_row}:E{current_row}')
     ws.cell(row=current_row, column=1,
-            value=f"《关于{request.reply_date}安全隐患整改有关事项回复》")
+            value=f"《关于{formatted_date}安全隐患整改有关事项回复》")
     ws.cell(row=current_row, column=1).font = title_font
     ws.cell(row=current_row, column=1).alignment = center_alignment
     ws.row_dimensions[current_row].height = 30
@@ -452,7 +455,8 @@ def export_rectification_reply(
         # 行 D-E：照片（合并 B:D / D:E 各两行），标签在左上角
         ws.merge_cells(f'B{current_row}:C{current_row + 1}')
         ws.merge_cells(f'D{current_row}:E{current_row + 1}')
-        for col in range(1, 6):
+        # A列已合并（整改事项回复），跳过避免操作 MergedCell
+        for col in range(2, 6):
             ws.cell(row=current_row, column=col).border = thin_border
             ws.cell(row=current_row + 1, column=col).border = thin_border
         # 标签写在左上角（top-left）
@@ -491,11 +495,19 @@ def export_rectification_reply(
         current_row += 2
 
     # ── 最后：回复日期 ────────────────────────────────────────────────────────
-    ws.cell(row=current_row, column=1, value="回复日期").font = header_font
+    try:
+        ws.cell(row=current_row, column=1, value="回复日期").font = header_font
+    except AttributeError:
+        # MergedCell 保护：拆掉残留合并
+        for mr in list(ws.merged_cells.ranges):
+            if mr.min_row <= current_row <= mr.max_row and mr.min_col <= 1 <= mr.max_col:
+                ws.unmerge_cells(str(mr))
+                break
+        ws.cell(row=current_row, column=1, value="回复日期").font = header_font
     ws.cell(row=current_row, column=1).alignment = left_alignment
     set_border_row(current_row)
     ws.merge_cells(f'B{current_row}:E{current_row}')
-    ws.cell(row=current_row, column=2, value=request.reply_date).font = normal_font
+    ws.cell(row=current_row, column=2, value=formatted_date).font = normal_font
     ws.cell(row=current_row, column=2).alignment = left_alignment
     for col in range(2, 6):
         ws.cell(row=current_row, column=col).border = thin_border

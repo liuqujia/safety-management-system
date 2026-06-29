@@ -1,12 +1,12 @@
-name: 🚀 推送代码到 NAS 并自动部署
+name: 🚀 构建前端（输出为 artifact）
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'backend/**'
       - 'safety-vue/**'
+      - 'backend/**'
   workflow_dispatch:
 
 jobs:
@@ -25,77 +25,17 @@ jobs:
         run: npm install -g pnpm
 
       - name: Build Vue frontend
+        working-directory: safety-vue
         run: |
-          cd safety-vue
-          pnpm approve-builds
+          pnpm approve-builds 2>/dev/null || true
           pnpm install
           pnpm build
           echo "✅ 前端构建完成"
+          ls -la dist/
 
-      - name: Upload dist artifact
+      - name: Upload frontend dist artifact
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
           path: safety-vue/dist/
-          retention-days: 1
-
-  deploy:
-    needs: build-frontend
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download frontend dist
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: safety-vue/dist/
-
-      - name: Install sshpass
-        run: sudo apt-get update && sudo apt-get install -y sshpass
-
-      - name: Deploy to NAS
-        env:
-          NAS_HOST: ${{ secrets.NAS_HOST }}
-          NAS_USER: ${{ secrets.NAS_USER }}
-          NAS_PASSWORD: ${{ secrets.NAS_PASSWORD }}
-          NAS_APP_DIR: ${{ vars.NAS_APP_DIR }}
-        run: |
-          # 上传 backend 代码
-          sshpass -p "$NAS_PASSWORD" ssh -o StrictHostKeyChecking=no $NAS_USER@$NAS_HOST "mkdir -p $NAS_APP_DIR/backend"
-          sshpass -p "$NAS_PASSWORD" rsync -avz --delete \
-            --exclude='__pycache__' --exclude='*.pyc' --exclude='.env' \
-            backend/ $NAS_USER@$NAS_HOST:$NAS_APP_DIR/backend/
-
-          # 上传前端构建产物
-          sshpass -p "$NAS_PASSWORD" ssh -o StrictHostKeyChecking=no $NAS_USER@$NAS_HOST "mkdir -p $NAS_APP_DIR/safety-vue"
-          sshpass -p "$NAS_PASSWORD" rsync -avz --delete \
-            safety-vue/dist/ $NAS_USER@$NAS_HOST:$NAS_APP_DIR/safety-vue/dist/
-
-          # 上传 docker-compose 和 nginx 配置
-          sshpass -p "$NAS_PASSWORD" scp -o StrictHostKeyChecking=no \
-            safety-vue/docker-compose.yml safety-vue/fnos-nginx.conf \
-            $NAS_USER@$NAS_HOST:$NAS_APP_DIR/safety-vue/
-
-          echo "✅ 文件上传完成"
-
-      - name: Restart Docker on NAS
-        uses: appleboy/ssh-action@v0.1.10
-        with:
-          host: ${{ secrets.NAS_HOST }}
-          username: ${{ secrets.NAS_USER }}
-          password: ${{ secrets.NAS_PASSWORD }}
-          port: 22
-          script: |
-            set -e
-            cd ${{ vars.NAS_APP_DIR }}
-            echo "🔄 重建后端..."
-            cd backend
-            docker compose down
-            docker compose up -d --build
-            echo "🔄 重启前端..."
-            cd ../safety-vue
-            docker compose down
-            docker compose up -d
-            echo "✅ 部署完成"
+          retention-days: 14

@@ -14,7 +14,7 @@ process.env.VUE_APP_UPDATE_TIME = time
 process.env.BASE_URL = publicPath
 // 删除这一行，避免覆盖rspack.js中设置的值
 // process.env.NODE_ENV = process.env.NODE_ENV || 'development'
-process.env.VUE_APP_MOCK_ENABLE = 'true' // 启用mock
+process.env.VUE_APP_MOCK_ENABLE = 'false' // 生产环境禁用Mock，使用真实后端API
 process.env.VUE_APP_AUTHOR = 'vue-admin-better' // 设置作者
 
 const resolve = (dir) => path.join(__dirname, dir)
