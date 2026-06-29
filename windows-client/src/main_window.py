@@ -127,20 +127,7 @@ class APIClient:
             return response.content
         return None
 
-    def preview_from_word(self, file_path):
-        with open(file_path, 'rb') as f:
-            files = {'file': (os.path.basename(file_path), f, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
-            response = requests.post(
-                f"{self.base_url}/api/issues/preview-from-word",
-                files=files,
-                timeout=60
-            )
-        if response.status_code != 200:
-            return {"success": False, "message": f"服务器返回错误码 {response.status_code}"}
-        try:
-            return response.json()
-        except Exception:
-            return {"success": False, "message": "服务器响应格式错误，不是合法JSON"}
+
 
     def import_from_word(self, file_path, skip_indices=None):
         with open(file_path, 'rb') as f:
@@ -177,144 +164,6 @@ class APIClient:
             return response.content
         return None
 
-
-class ImportPreviewDialog(QDialog):
-    def __init__(self, preview_data, parent=None):
-        super().__init__(parent)
-        self.preview_data = preview_data
-        self.items = preview_data.get('items', [])
-        self.checkboxes = []
-        self.init_ui()
-
-    def init_ui(self):
-        self.setWindowTitle("导入预览 - 勾选要导入的隐患")
-        self.setMinimumSize(700, 500)
-        layout = QVBoxLayout(self)
-
-        info_label = QLabel()
-        project = self.preview_data.get('project_name', '未识别到项目名称')
-        info_label.setText(f"<b>项目：</b>{project}　　<b>共 {len(self.items)} 条隐患（勾选表示导入）</b>")
-        info_label.setStyleSheet("padding: 8px; background: #f5f5f5; border-radius: 4px;")
-        layout.addWidget(info_label)
-
-        btn_row = QHBoxLayout()
-        self.select_all_btn = QPushButton("全选")
-        self.select_all_btn.clicked.connect(self.select_all)
-        self.select_all_btn.setStyleSheet("padding: 6px 16px;")
-        self.deselect_all_btn = QPushButton("取消全选")
-        self.deselect_all_btn.clicked.connect(self.deselect_all)
-        self.deselect_all_btn.setStyleSheet("padding: 6px 16px;")
-        btn_row.addWidget(self.select_all_btn)
-        btn_row.addWidget(self.deselect_all_btn)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
-        scroll_layout.setSpacing(6)
-
-        self.item_rows = []  # [(row_widget, checkbox, idx_label)]
-        for idx, item in enumerate(self.items):
-            row = QWidget()
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(8, 4, 8, 4)
-
-            cb = QCheckBox()
-            cb.setChecked(True)
-            self.checkboxes.append(cb)
-            row_layout.addWidget(cb)
-
-            idx_label = QLabel(f"<b>{idx + 1}</b>")
-            idx_label.setMinimumWidth(30)
-            idx_label.setAlignment(Qt.AlignCenter)
-            row_layout.addWidget(idx_label)
-
-            content_widget = QWidget()
-            content_layout = QVBoxLayout(content_widget)
-            content_layout.setContentsMargins(0, 0, 0, 0)
-
-            title_label = QLabel(f"<b>{item.get('title', '')}</b>")
-            title_label.setWordWrap(True)
-            content_layout.addWidget(title_label)
-
-            if item.get('description'):
-                desc_label = QLabel(f'<font color="#666" size="-1">描述：{item.get("description", "")[:80]}</font>')
-                desc_label.setWordWrap(True)
-                content_layout.addWidget(desc_label)
-            if item.get('notes'):
-                notes_label = QLabel(f'<font color="#888" size="-1">措施：{item.get("notes", "")[:80]}</font>')
-                notes_label.setWordWrap(True)
-                content_layout.addWidget(notes_label)
-            if item.get('deadline'):
-                dl_label = QLabel(f'<font color="#E6A23C" size="-1">期限：{item.get("deadline")}</font>')
-                content_layout.addWidget(dl_label)
-
-            content_layout.addStretch()
-            row_layout.addWidget(content_widget, 1)
-
-            # 删除按钮
-            del_btn = QPushButton("删除")
-            del_btn.setStyleSheet("background-color: #F56C6C; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px;")
-            del_btn.setMinimumWidth(50)
-            del_btn.clicked.connect(lambda checked, r=row, c=cb, lbl=idx_label, dbtn=del_btn: self._remove_item(r, c, lbl, dbtn))
-            row_layout.addWidget(del_btn)
-
-            scroll_layout.addWidget(row)
-            self.item_rows.append((row, cb, idx_label, del_btn))
-
-    def _remove_item(self, row, cb, idx_label, del_btn):
-        """从预览列表中物理删除这一行"""
-        row.hide()
-        cb.setChecked(False)  # 标记为跳过
-        self.update_count()
-
-        scroll_layout.addStretch()
-        scroll.setWidget(scroll_widget)
-        layout.addWidget(scroll)
-
-        bottom_row = QHBoxLayout()
-        self.count_label = QLabel()
-        self.count_label.setStyleSheet("color: #409EFF; font-weight: bold;")
-        self.update_count()
-        bottom_row.addWidget(self.count_label)
-        bottom_row.addStretch()
-
-        self.confirm_btn = QPushButton("确认导入")
-        self.confirm_btn.setStyleSheet("background-color: #409EFF; color: white; padding: 8px 24px; border-radius: 4px;")
-        self.confirm_btn.clicked.connect(self.accept)
-        cancel_btn = QPushButton("取消")
-        cancel_btn.setStyleSheet("padding: 8px 24px;")
-        cancel_btn.clicked.connect(self.reject)
-        bottom_row.addWidget(self.confirm_btn)
-        bottom_row.addWidget(cancel_btn)
-        layout.addLayout(bottom_row)
-
-        for cb in self.checkboxes:
-            cb.toggled.connect(self.update_count)
-
-    def update_count(self):
-        checked = sum(1 for cb in self.checkboxes if cb.isChecked())
-        self.count_label.setText(f"已选 {checked} / {len(self.items)} 条")
-
-    def select_all(self):
-        for cb in self.checkboxes:
-            cb.setChecked(True)
-
-    def deselect_all(self):
-        for cb in self.checkboxes:
-            cb.setChecked(False)
-
-    def get_skip_indices(self):
-        skip = []
-        for idx, cb in enumerate(self.checkboxes):
-            if not cb.isChecked():
-                skip.append(idx)
-        return skip
-
-    def get_checked_count(self):
-        return sum(1 for cb in self.checkboxes if cb.isChecked())
 
 
 class MainWindow(QMainWindow):
@@ -716,67 +565,29 @@ class MainWindow(QMainWindow):
                     QMessageBox.warning(self, "错误", f"上传失败: {str(e)}")
 
     def import_word_dialog(self):
+        file_path = QFileDialog.getOpenFileName(
+            self, "选择问题清单Word文件", "",
+            "Word文件 (*.docx *.doc)"
+        )
+        if not file_path[0]:
+            return
         try:
-            file_path = QFileDialog.getOpenFileName(
-                self, "选择问题清单Word文件", "",
-                "Word文件 (*.docx *.doc)"
-            )
-            if not file_path[0]:
-                return
-
-            # 第一步：预览
-            try:
-                preview = self.api_client.preview_from_word(file_path[0])
-            except AttributeError as e:
-                QMessageBox.warning(self, "版本过旧",
-                    f"当前exe版本不支持此功能，请重新下载最新exe。\n错误: {str(e)}")
-                return
-            except Exception as e:
-                QMessageBox.warning(self, "错误", f"连接服务器失败: {str(e)}")
-                return
-
-            if not preview or not preview.get('success'):
-                msg = preview.get('message', '无法读取Word文件内容') if preview else '无法读取Word文件内容'
-                QMessageBox.warning(self, "预览失败", msg)
-                return
-
-            items = preview.get('items') or []
-            if not items:
-                QMessageBox.warning(self, "未识别到隐患", "从Word文件中未识别到任何隐患记录")
-                return
-
-            # 弹出预览对话框
-            try:
-                dialog = ImportPreviewDialog(preview, self)
-                if dialog.exec_() != QDialog.Accepted:
-                    return
-            except Exception as e:
-                QMessageBox.warning(self, "错误", f"预览窗口异常: {str(e)}")
-                return
-
-            skip_indices = dialog.get_skip_indices()
-            checked_count = dialog.get_checked_count()
-
-            if checked_count == 0:
-                QMessageBox.information(self, "取消", "未选择任何隐患，导入已取消")
-                return
-
-            # 第二步：导入（跳过未勾选的）
-            try:
-                result = self.api_client.import_from_word(file_path[0], skip_indices=skip_indices)
-                if result and result.get('success'):
-                    msg = f"成功导入 {result['imported_count']} 条隐患记录\n项目：{result.get('project_name', '')}"
-                    QMessageBox.information(self, "导入成功", msg)
-                    self.refresh_issues()
-                elif result:
-                    QMessageBox.warning(self, "导入部分成功",
-                        f"成功 {result.get('imported_count', 0) if result else 0} 条，错误：{result.get('message', '') if result else ''}")
-                else:
-                    QMessageBox.warning(self, "导入失败", "API返回为空")
-            except Exception as e:
-                QMessageBox.warning(self, "错误", f"导入失败: {str(e)}")
+            result = self.api_client.import_from_word(file_path[0])
+            if result and result.get('success'):
+                msg = f"成功导入 {result['imported_count']} 条隐患记录"
+                if result.get('project_name'):
+                    msg += f"\n项目：{result['project_name']}"
+                QMessageBox.information(self, "导入成功", msg)
+                self.refresh_issues()
+            elif result:
+                QMessageBox.warning(self, "导入失败", result.get('message', '未知错误'))
+            else:
+                QMessageBox.warning(self, "导入失败", "服务器返回为空，请确认后端已更新到最新版本")
+        except AttributeError as e:
+            QMessageBox.warning(self, "版本过旧",
+                f"当前exe版本不支持此功能，请重新下载最新exe。\n错误: {str(e)}")
         except Exception as e:
-            QMessageBox.warning(self, "未知错误", f"发生异常: {str(e)}")
+            QMessageBox.warning(self, "导入失败", str(e))
 
 
     def do_export(self, dialog):
