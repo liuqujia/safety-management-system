@@ -81,6 +81,7 @@
                 </template>
               </el-table-column>
               <el-table-column prop="responsible_person" label="责任人" width="100" />
+              <el-table-column prop="create_time" label="创建日期" width="100" />
               <el-table-column prop="photo_count" label="照片" width="60" align="center" />
               <el-table-column label="操作" width="200" fixed="right" align="center">
                 <template #default="{ row }">
