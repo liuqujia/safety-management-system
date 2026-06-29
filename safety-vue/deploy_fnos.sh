@@ -182,7 +182,7 @@ ENDSSH
     echo "🎉 恭喜！Vue前端已成功部署到飞牛NAS"
     echo ""
     echo "📱 访问地址："
-    echo "   - Vue前端: http://${NAS_IP}:8888/"
+    echo "   - Vue前端: http://${NAS_IP}:8866/"
     echo "   - 后端API: http://${NAS_IP}:9999"
     echo "   - API文档: http://${NAS_IP}:9999/docs"
     echo ""
