@@ -234,6 +234,10 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
                     
                     debug_info.append(f"  cells长度: {len(cells)}")
                     
+                    # 表格列对应关系（标准隐患检查表模板）：
+                    # cells[0]=序号, cells[1]=现场图片, cells[2]=检查发现的主要隐患或问题(title),
+                    # cells[3]=法规名称/代码/条款号(description), cells[4]=整改措施或建议(notes),
+                    # cells[5]=备注(内含"整改时限：X月X日"，用于解析 deadline)
                     if len(cells) >= 3:
                         title = cells[2].text.strip()
                         debug_info.append(f"  title值: '{title}'")
@@ -244,7 +248,7 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
                     if len(cells) >= 6:
                         remarks = cells[5].text.strip()
                         deadline = parse_deadline(remarks)
-                        debug_info.append(f"  deadline值: {deadline}")
+                        debug_info.append(f"  deadline值: {deadline}, remarks: '{remarks[:60]}'")
                     
                     if not title:
                         debug_info.append(f"  title为空，尝试查找")

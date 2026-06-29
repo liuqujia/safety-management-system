@@ -125,3 +125,77 @@ export function deletePhoto(photoId) {
     method: 'delete'
   })
 }
+
+/**
+ * @description 获取导出模板列表
+ */
+export function getTemplates() {
+  return request({
+    url: '/api/export/templates',
+    method: 'get'
+  })
+}
+
+/**
+ * @description 创建导出模板
+ * @param {Object} data
+ */
+export function createTemplate(data) {
+  return request({
+    url: '/api/export/templates',
+    method: 'post',
+    data
+  })
+}
+
+/**
+ * @description 更新导出模板
+ * @param {Number} id
+ * @param {Object} data
+ */
+export function updateTemplate(id, data) {
+  return request({
+    url: `/api/export/templates/${id}`,
+    method: 'put',
+    data
+  })
+}
+
+/**
+ * @description 删除导出模板
+ * @param {Number} id
+ */
+export function deleteTemplate(id) {
+  return request({
+    url: `/api/export/templates/${id}`,
+    method: 'delete'
+  })
+}
+
+/**
+ * @description 导出整改回复报告
+ * @param {Object} data
+ */
+export function exportRectificationReply(data) {
+  return request({
+    url: '/api/export/rectification-reply',
+    method: 'post',
+    data,
+    responseType: 'blob'
+  })
+}
+
+/**
+ * @description 从Word文档导入隐患
+ * @param {FormData} formData
+ */
+export function importFromWord(formData) {
+  return request({
+    url: '/api/issues/import-from-word',
+    method: 'post',
+    data: formData,
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+}

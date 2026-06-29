@@ -2,6 +2,37 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime
 
+
+class TemplateCreate(BaseModel):
+    """创建模板"""
+    name: str
+    title_format: str = "《关于{date}安全隐患整改有关事项回复》"
+    columns: List[str] = []
+    is_default: bool = False
+
+
+class TemplateUpdate(BaseModel):
+    """更新模板"""
+    name: Optional[str] = None
+    title_format: Optional[str] = None
+    columns: Optional[List[str]] = None
+    is_default: Optional[bool] = None
+
+
+class TemplateResponse(BaseModel):
+    """模板响应"""
+    id: int
+    name: str
+    title_format: str
+    columns: List[str] = []
+    is_default: bool = False
+    create_time: Optional[str] = None
+    update_time: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class IssueCreate(BaseModel):
     """创建问题的数据模型"""
     title: str
