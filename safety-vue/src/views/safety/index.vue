@@ -309,12 +309,23 @@
             <span v-if="importPreview.project_name" style="margin-left: 12px; color: #909399">项目：{{ importPreview.project_name }}</span>
           </el-form-item>
           <el-form-item label="隐患预览" v-if="importPreview.items?.length">
+            <div style="margin-bottom: 8px; color: #909399; font-size: 12px">
+              共 {{ importPreview.items.length }} 条，点 × 删除不需要的
+            </div>
             <div class="preview-items">
               <div v-for="(it, i) in importPreview.items" :key="i" class="preview-item">
-                <div class="preview-title">隐患{{ i + 1 }}：{{ it.title }}</div>
-                <div v-if="it.description" class="preview-desc">描述：{{ it.description }}</div>
-                <div v-if="it.notes" class="preview-desc">措施：{{ it.notes }}</div>
-                <div v-if="it.deadline" class="preview-desc">期限：{{ it.deadline }}</div>
+                <div class="preview-item-row">
+                  <span class="preview-index">{{ i + 1 }}</span>
+                  <div class="preview-body">
+                    <div class="preview-title">{{ it.title }}</div>
+                    <div v-if="it.description" class="preview-desc">描述：{{ it.description }}</div>
+                    <div v-if="it.notes" class="preview-desc">措施：{{ it.notes }}</div>
+                    <div v-if="it.deadline" class="preview-desc">期限：{{ it.deadline }}</div>
+                  </div>
+                  <el-button link type="danger" @click="removePreviewItem(i)" class="preview-del-btn">
+                    <el-icon><Close /></el-icon>
+                  </el-button>
+                </div>
               </div>
             </div>
           </el-form-item>
@@ -332,7 +343,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, UploadFilled, ArrowDown } from '@element-plus/icons-vue'
+import { Plus, UploadFilled, ArrowDown, Close } from '@element-plus/icons-vue'
 import {
   getIssues, getIssue, createIssue, updateIssue, deleteIssue,
   uploadPhoto, downloadPhoto,
@@ -691,6 +702,12 @@ const handleWordFileRemove = () => {
   importPreview.value = null
 }
 
+const removePreviewItem = (index) => {
+  if (importPreview.value?.items) {
+    importPreview.value.items.splice(index, 1)
+  }
+}
+
 const resetImportDialog = () => {
   selectedWordFile.value = null
   importPreview.value = null
@@ -770,11 +787,39 @@ const getPhotoUrl = (photoId) => {
   padding: 8px;
 }
 .preview-item {
-  padding: 8px 0;
   border-bottom: 1px solid #f0f0f0;
 }
 .preview-item:last-child {
   border-bottom: none;
+}
+.preview-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+}
+.preview-index {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  background: #f0f2f5;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #909399;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.preview-body {
+  flex: 1;
+  min-width: 0;
+}
+.preview-del-btn {
+  flex-shrink: 0;
+  margin-top: 2px;
+  padding: 4px;
 }
 .preview-title {
   font-weight: 600;
