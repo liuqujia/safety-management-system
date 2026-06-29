@@ -652,6 +652,10 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"导出失败: {str(e)}")
 
+    def template_management_dialog(self):
+        dialog = TemplateManagementDialog(self)
+        dialog.exec_()
+
     def export_excel_with_photos_dialog(self):
         file_path = QFileDialog.getSaveFileName(
             self, "保存Excel文件（带照片）", "",
