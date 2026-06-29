@@ -169,3 +169,72 @@ def update_status(
     db.commit()
     db.refresh(db_issue)
     return db_issue.to_dict()
+@router.post("/import-from-word")
+async def import_from_word(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        from docx import Document
+        
+        contents = await file.read()
+        doc = Document(io.BytesIO(contents))
+        
+        imported_count = 0
+        errors = []
+        project_name = ""
+        
+        for paragraph in doc.paragraphs:
+            if "企业名称" in paragraph.text:
+                project_name = paragraph.text.replace("企业名称：", "").replace("企业名称:", "").strip()
+        
+        for table in doc.tables:
+            for row_idx, row in enumerate(table.rows):
+                if row_idx == 0:
+                    continue
+                
+                try:
+                    cells = row.cells
+                    if len(cells) < 6:
+                        continue
+                    
+                    title = cells[2].text.strip() if len(cells) > 2 else ""
+                    if not title:
+                        continue
+                    
+                    description = cells[3].text.strip() if len(cells) > 3 else ""
+                    rectification = cells[4].text.strip() if len(cells) > 4 else ""
+                    remarks = cells[5].text.strip() if len(cells) > 5 else ""
+                    
+                    deadline = None
+                    if "时限" in remarks:
+                        import re
+                        match = re.search(r'(\d+月\d+日)', remarks)
+                        if match:
+                            deadline = match.group(1)
+                    
+                    issue_data = {
+                        'title': title,
+                        'description': description,
+                        'location': '',
+                        'severity': '一般',
+                        'deadline': deadline,
+                        'project_name': project_name,
+                        'responsible_person': '',
+                        'status': '待整改'
+                    }
+                    
+                    db_issue = SafetyIssue(**issue_data)
+                    db.add(db_issue)
+                    db.commit()
+                    db.refresh(db_issue)
+                    imported_count += 1
+                except Exception as e:
+                    errors.append(f"第{row_idx}行导入失败: {str(e)}")
+        
+        db.commit()
+        
+        return {
+            'success': True,
+            'imported_count': imported_count,
+            'errors': errors
+        }
+    except Exception as e:
+        return {'success': False, 'message': str(e)}

@@ -127,6 +127,16 @@ class APIClient:
             return response.content
         return None
 
+    def import_from_word(self, file_path):
+        with open(file_path, 'rb') as f:
+            files = {'file': (os.path.basename(file_path), f, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
+            response = requests.post(
+                f"{self.base_url}/api/issues/import-from-word",
+                files=files,
+                timeout=60
+            )
+        return response.json() if response.status_code == 200 else None
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -202,6 +212,11 @@ class MainWindow(QMainWindow):
         add_issue_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px 16px; border-radius: 4px;")
         add_issue_btn.clicked.connect(self.add_issue_dialog)
         function_bar.addWidget(add_issue_btn)
+
+        import_word_btn = QPushButton("导入Word")
+        import_word_btn.setStyleSheet("background-color: #607D8B; color: white; padding: 8px 16px; border-radius: 4px;")
+        import_word_btn.clicked.connect(self.import_word_dialog)
+        function_bar.addWidget(import_word_btn)
 
         export_btn = QPushButton("导出Excel")
         export_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 8px 16px; border-radius: 4px;")
@@ -518,6 +533,25 @@ class MainWindow(QMainWindow):
                     )
                 except Exception as e:
                     QMessageBox.warning(self, "错误", f"上传失败: {str(e)}")
+
+    def import_word_dialog(self):
+        file_path = QFileDialog.getOpenFileName(
+            self, "选择Word文件", "",
+            "Word文件 (*.docx *.doc)"
+        )
+        if file_path[0]:
+            try:
+                result = self.api_client.import_from_word(file_path[0])
+                if result and result.get('success'):
+                    QMessageBox.information(
+                        self, "成功",
+                        f"成功导入{result['imported_count']}条记录"
+                    )
+                    self.refresh_issues()
+                else:
+                    QMessageBox.warning(self, "导入失败", result.get('message', '未知错误'))
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"导入失败: {str(e)}")
 
     def export_excel_dialog(self):
         file_path = QFileDialog.getSaveFileName(
