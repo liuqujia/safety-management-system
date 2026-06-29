@@ -5,82 +5,74 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QPushButton, QComboBox, QTableWidget, QTableWidgetItem,
                              QHeaderView, QDialog, QFormLayout, QFileDialog,
                              QMessageBox, QDateEdit, QGroupBox, QScrollArea,
-                             QSplitter, QListWidget, QListWidgetItem, QProgressBar)
+                             QSplitter, QListWidget, QListWidgetItem, QProgressBar,
+                             QToolBar, QAction)
 from PyQt5.QtCore import Qt, QDate, QTimer
-from PyQt5.QtGui import QPixmap, QIcon
+from PyQt5.QtGui import QPixmap, QIcon, QPalette, QColor
 import requests
 from datetime import datetime
 import json
 
 class APIClient:
-    """API客户端"""
     def __init__(self, base_url):
         self.base_url = base_url
 
     def get_issues(self, status=None, severity=None):
-        """获取问题列表"""
         params = {}
         if status:
             params['status'] = status
         if severity:
             params['severity'] = severity
-
-        response = requests.get(f"{self.base_url}/api/issues/", params=params)
+        response = requests.get(f"{self.base_url}/api/issues/", params=params, timeout=30)
         return response.json() if response.status_code == 200 else []
 
     def get_issue(self, issue_id):
-        """获取单个问题"""
-        response = requests.get(f"{self.base_url}/api/issues/{issue_id}")
+        response = requests.get(f"{self.base_url}/api/issues/{issue_id}", timeout=30)
         return response.json() if response.status_code == 200 else None
 
     def create_issue(self, data, photos):
-        """创建问题"""
         files = [('photos', (photo[0], open(photo[1], 'rb'))) for photo in photos]
         response = requests.post(
             f"{self.base_url}/api/issues/with-photos",
             data=data,
-            files=files
+            files=files,
+            timeout=60
         )
-        # 关闭文件
         for file_tuple in files:
-            file_tuple[1][1].close()
+            file_tuple[1].close()
         return response.json() if response.status_code == 200 else None
 
     def update_issue(self, issue_id, data):
-        """更新问题"""
-        response = requests.put(f"{self.base_url}/api/issues/{issue_id}", json=data)
+        response = requests.put(f"{self.base_url}/api/issues/{issue_id}", json=data, timeout=30)
         return response.json() if response.status_code == 200 else None
 
     def delete_issue(self, issue_id):
-        """删除问题"""
-        response = requests.delete(f"{self.base_url}/api/issues/{issue_id}")
+        response = requests.delete(f"{self.base_url}/api/issues/{issue_id}", timeout=30)
         return response.status_code == 200
 
     def upload_photo(self, issue_id, photo_type, photos):
-        """上传照片"""
         files = [('photos', (photo[0], open(photo[1], 'rb'))) for photo in photos]
         data = {'photo_type': photo_type}
         response = requests.post(
             f"{self.base_url}/api/issues/{issue_id}/photos",
             data=data,
-            files=files
+            files=files,
+            timeout=60
         )
-        # 关闭文件
         for file_tuple in files:
-            file_tuple[1][1].close()
+            file_tuple[1].close()
         return response.json() if response.status_code == 200 else None
 
     def update_status(self, issue_id, status):
-        """更新状态"""
         response = requests.put(
             f"{self.base_url}/api/issues/{issue_id}/status",
-            params={'status': status}
+            params={'status': status},
+            timeout=30
         )
         return response.json() if response.status_code == 200 else None
 
     def download_photo(self, photo_id, save_path):
-        """下载照片"""
-        response = requests.get(f"{self.base_url}/api/photos/{photo_id}/download")
+        response = requests.get(f"{self.base_url}/api/photos/{photo_id}/download", timeout=30)
         if response.status_code == 200:
             with open(save_path, 'wb') as f:
                 f.write(response.content)
@@ -88,39 +80,54 @@ class APIClient:
         return False
 
     def export_excel(self, status=None, severity=None):
-        """导出Excel"""
         params = {}
         if status:
             params['status'] = status
         if severity:
             params['severity'] = severity
-
         response = requests.get(
             f"{self.base_url}/api/export/excel",
-            params=params
+            params=params,
+            timeout=60
         )
         if response.status_code == 200:
             return response.content
         return None
 
     def export_excel_with_photos(self, status=None, severity=None):
-        """导出Excel（带照片）"""
         params = {}
         if status:
             params['status'] = status
         if severity:
             params['severity'] = severity
-
         response = requests.get(
             f"{self.base_url}/api/export/excel-with-photos",
-            params=params
+            params=params,
+            timeout=60
+        )
+        if response.status_code == 200:
+            return response.content
+        return None
+
+    def export_rectification_reply(self, project_name, project_responsible, reply_date, issues=None):
+        data = {
+            'project_name': project_name,
+            'project_responsible': project_responsible,
+            'reply_date': reply_date
+        }
+        if issues:
+            data['issue_ids'] = issues
+
+        response = requests.post(
+            f"{self.base_url}/api/export/rectification-reply",
+            json=data,
+            timeout=120
         )
         if response.status_code == 200:
             return response.content
         return None
 
 class MainWindow(QMainWindow):
-    """主窗口"""
     def __init__(self):
         super().__init__()
         self.api_client = None
@@ -130,91 +137,95 @@ class MainWindow(QMainWindow):
         self.refresh_issues()
 
     def load_config(self):
-        """加载配置"""
         if os.path.exists(self.config_file):
             with open(self.config_file, 'r') as f:
                 config = json.load(f)
                 self.server_url = config.get('server_url', 'http://localhost:8000')
         else:
             self.server_url = 'http://localhost:8000'
-
         self.api_client = APIClient(self.server_url)
 
     def save_config(self):
-        """保存配置"""
         config = {'server_url': self.server_url}
         with open(self.config_file, 'w') as f:
             json.dump(config, f)
 
     def init_ui(self):
-        """初始化界面"""
         self.setWindowTitle("安全整改管理系统")
-        self.setGeometry(100, 100, 1400, 800)
+        self.setGeometry(100, 100, 1400, 900)
 
-        # 创建主窗口部件
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-
-        # 主布局
         main_layout = QVBoxLayout()
         main_widget.setLayout(main_layout)
 
-        # 顶部工具栏
-        toolbar_layout = QHBoxLayout()
+        toolbar = QToolBar()
+        toolbar.setMovable(False)
+        self.addToolBar(toolbar)
 
-        # 服务器配置
+        toolbar.addWidget(QLabel("服务器:"))
         self.server_input = QLineEdit(self.server_url)
-        self.server_input.setPlaceholderText("服务器地址")
-        toolbar_layout.addWidget(QLabel("服务器:"))
-        toolbar_layout.addWidget(self.server_input)
+        self.server_input.setFixedWidth(200)
+        toolbar.addWidget(self.server_input)
 
-        # 保存配置按钮
         save_config_btn = QPushButton("保存配置")
         save_config_btn.clicked.connect(self.save_server_config)
-        toolbar_layout.addWidget(save_config_btn)
+        toolbar.addWidget(save_config_btn)
 
-        # 刷新按钮
+        toolbar.addSeparator()
+
         refresh_btn = QPushButton("刷新")
         refresh_btn.clicked.connect(self.refresh_issues)
-        toolbar_layout.addWidget(refresh_btn)
+        toolbar.addWidget(refresh_btn)
 
-        # 状态筛选
-        toolbar_layout.addWidget(QLabel("状态:"))
+        toolbar.addSeparator()
+
+        toolbar.addWidget(QLabel("状态:"))
         self.status_filter = QComboBox()
         self.status_filter.addItems(["全部", "待整改", "整改中", "已完成"])
         self.status_filter.currentTextChanged.connect(self.filter_issues)
-        toolbar_layout.addWidget(self.status_filter)
+        toolbar.addWidget(self.status_filter)
 
-        # 严重程度筛选
-        toolbar_layout.addWidget(QLabel("严重程度:"))
+        toolbar.addWidget(QLabel("严重程度:"))
         self.severity_filter = QComboBox()
         self.severity_filter.addItems(["全部", "轻微", "一般", "严重"])
         self.severity_filter.currentTextChanged.connect(self.filter_issues)
-        toolbar_layout.addWidget(self.severity_filter)
+        toolbar.addWidget(self.severity_filter)
 
-        main_layout.addLayout(toolbar_layout)
+        main_layout.addWidget(toolbar)
 
-        # 功能按钮区
-        function_layout = QHBoxLayout()
+        function_bar = QToolBar()
+        function_bar.setMovable(False)
+        self.addToolBar(function_bar)
 
-        # 新增问题按钮
         add_issue_btn = QPushButton("新增问题")
+        add_issue_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px 16px; border-radius: 4px;")
         add_issue_btn.clicked.connect(self.add_issue_dialog)
-        function_layout.addWidget(add_issue_btn)
+        function_bar.addWidget(add_issue_btn)
 
-        # 导出Excel按钮
         export_btn = QPushButton("导出Excel")
+        export_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 8px 16px; border-radius: 4px;")
         export_btn.clicked.connect(self.export_excel_dialog)
-        function_layout.addWidget(export_btn)
+        function_bar.addWidget(export_btn)
 
-        # 导出Excel（带照片）按钮
         export_with_photos_btn = QPushButton("导出Excel（带照片）")
+        export_with_photos_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 8px 16px; border-radius: 4px;")
         export_with_photos_btn.clicked.connect(self.export_excel_with_photos_dialog)
-        function_layout.addWidget(export_with_photos_btn)
+        function_bar.addWidget(export_with_photos_btn)
 
-        main_layout.addLayout(function_layout)
+        export_reply_btn = QPushButton("导出整改回复")
+        export_reply_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px 16px; border-radius: 4px;")
+        export_reply_btn.clicked.connect(self.export_rectification_reply_dialog)
+        function_bar.addWidget(export_reply_btn)
 
-        # 问题列表表格
+        main_layout.addWidget(function_bar)
+
+        splitter = QSplitter(Qt.Horizontal)
+
+        table_widget = QWidget()
+        table_layout = QVBoxLayout()
+        table_widget.setLayout(table_layout)
+
         self.issues_table = QTableWidget()
         self.issues_table.setColumnCount(8)
         self.issues_table.setHorizontalHeaderLabels([
@@ -224,120 +235,126 @@ class MainWindow(QMainWindow):
         self.issues_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.issues_table.setSelectionMode(QTableWidget.SingleSelection)
         self.issues_table.cellClicked.connect(self.show_issue_detail)
+        table_layout.addWidget(self.issues_table)
 
-        main_layout.addWidget(self.issues_table)
+        splitter.addWidget(table_widget)
 
-        # 详情区域（使用分割器）
-        splitter = QSplitter(Qt.Horizontal)
+        detail_splitter = QSplitter(Qt.Vertical)
 
-        # 左侧：问题详情
         detail_widget = QWidget()
         detail_layout = QVBoxLayout()
         detail_widget.setLayout(detail_layout)
 
-        detail_layout.addWidget(QLabel("问题详情:"))
-
-        # 详情表单
-        detail_form = QFormLayout()
+        group_box = QGroupBox("问题详情")
+        form_layout = QFormLayout()
+        group_box.setLayout(form_layout)
 
         self.detail_title = QLineEdit()
         self.detail_title.setReadOnly(True)
-        detail_form.addRow("标题:", self.detail_title)
+        form_layout.addRow("标题:", self.detail_title)
 
         self.detail_description = QTextEdit()
         self.detail_description.setReadOnly(True)
-        detail_form.addRow("描述:", self.detail_description)
+        self.detail_description.setMaximumHeight(80)
+        form_layout.addRow("描述:", self.detail_description)
 
         self.detail_location = QLineEdit()
         self.detail_location.setReadOnly(True)
-        detail_form.addRow("位置:", self.detail_location)
+        form_layout.addRow("位置:", self.detail_location)
 
         self.detail_severity = QLineEdit()
         self.detail_severity.setReadOnly(True)
-        detail_form.addRow("严重程度:", self.detail_severity)
+        form_layout.addRow("严重程度:", self.detail_severity)
 
         self.detail_status = QComboBox()
         self.detail_status.addItems(["待整改", "整改中", "已完成"])
         self.detail_status.currentTextChanged.connect(self.update_issue_status)
-        detail_form.addRow("状态:", self.detail_status)
+        form_layout.addRow("状态:", self.detail_status)
 
         self.detail_responsible = QLineEdit()
         self.detail_responsible.setReadOnly(True)
-        detail_form.addRow("责任人:", self.detail_responsible)
+        form_layout.addRow("责任人:", self.detail_responsible)
 
         self.detail_deadline = QLineEdit()
         self.detail_deadline.setReadOnly(True)
-        detail_form.addRow("整改期限:", self.detail_deadline)
+        form_layout.addRow("整改期限:", self.detail_deadline)
 
         self.detail_create_time = QLineEdit()
         self.detail_create_time.setReadOnly(True)
-        detail_form.addRow("创建时间:", self.detail_create_time)
+        form_layout.addRow("创建时间:", self.detail_create_time)
 
-        detail_layout.addLayout(detail_form)
+        detail_layout.addWidget(group_box)
 
-        # 操作按钮
-        detail_btn_layout = QHBoxLayout()
-
+        btn_layout = QHBoxLayout()
         edit_btn = QPushButton("编辑")
         edit_btn.clicked.connect(self.edit_issue_dialog)
-        detail_btn_layout.addWidget(edit_btn)
+        btn_layout.addWidget(edit_btn)
 
         delete_btn = QPushButton("删除")
+        delete_btn.setStyleSheet("color: red;")
         delete_btn.clicked.connect(self.delete_issue)
-        detail_btn_layout.addWidget(delete_btn)
+        btn_layout.addWidget(delete_btn)
 
-        detail_layout.addLayout(detail_btn_layout)
+        detail_layout.addLayout(btn_layout)
 
-        splitter.addWidget(detail_widget)
+        detail_splitter.addWidget(detail_widget)
 
-        # 右侧：照片显示
         photos_widget = QWidget()
         photos_layout = QVBoxLayout()
         photos_widget.setLayout(photos_layout)
 
-        photos_layout.addWidget(QLabel("照片:"))
+        photos_group = QGroupBox("照片管理")
+        photos_group_layout = QVBoxLayout()
+        photos_group.setLayout(photos_group_layout)
 
-        # 问题照片列表
-        photos_layout.addWidget(QLabel("问题照片:"))
+        photos_group_layout.addWidget(QLabel("问题照片:"))
         self.issue_photos_list = QListWidget()
+        self.issue_photos_list.setMaximumHeight(100)
         self.issue_photos_list.itemClicked.connect(self.show_photo_preview)
-        photos_layout.addWidget(self.issue_photos_list)
+        photos_group_layout.addWidget(self.issue_photos_list)
 
-        # 整改照片列表
-        photos_layout.addWidget(QLabel("整改照片:"))
+        photos_group_layout.addWidget(QLabel("整改照片:"))
         self.rectification_photos_list = QListWidget()
+        self.rectification_photos_list.setMaximumHeight(100)
         self.rectification_photos_list.itemClicked.connect(self.show_photo_preview)
-        photos_layout.addWidget(self.rectification_photos_list)
+        photos_group_layout.addWidget(self.rectification_photos_list)
 
-        # 上传整改照片按钮
-        upload_rectification_btn = QPushButton("上传整改照片")
-        upload_rectification_btn.clicked.connect(self.upload_rectification_photo)
-        photos_layout.addWidget(upload_rectification_btn)
+        upload_btn = QPushButton("上传整改照片")
+        upload_btn.setStyleSheet("background-color: #00BCD4; color: white; padding: 6px 12px; border-radius: 4px;")
+        upload_btn.clicked.connect(self.upload_rectification_photo)
+        photos_group_layout.addWidget(upload_btn)
 
-        splitter.addWidget(photos_widget)
+        photos_layout.addWidget(photos_group)
 
-        # 图片预览区域
+        detail_splitter.addWidget(photos_widget)
+
+        splitter.addWidget(detail_splitter)
+
         preview_widget = QWidget()
         preview_layout = QVBoxLayout()
         preview_widget.setLayout(preview_layout)
 
-        preview_layout.addWidget(QLabel("照片预览:"))
+        preview_group = QGroupBox("照片预览")
+        preview_group_layout = QVBoxLayout()
+        preview_group.setLayout(preview_group_layout)
+
         self.photo_preview = QLabel()
         self.photo_preview.setAlignment(Qt.AlignCenter)
         self.photo_preview.setMinimumSize(300, 300)
-        preview_layout.addWidget(self.photo_preview)
+        self.photo_preview.setStyleSheet("background-color: #f0f0f0; border: 1px solid #ccc;")
+        preview_group_layout.addWidget(self.photo_preview)
+
+        preview_layout.addWidget(preview_group)
 
         splitter.addWidget(preview_widget)
 
-        # 设置分割器比例
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 1)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        splitter.setStretchFactor(2, 2)
 
         main_layout.addWidget(splitter)
 
     def save_server_config(self):
-        """保存服务器配置"""
         self.server_url = self.server_input.text()
         self.api_client = APIClient(self.server_url)
         self.save_config()
@@ -345,7 +362,6 @@ class MainWindow(QMainWindow):
         self.refresh_issues()
 
     def refresh_issues(self):
-        """刷新问题列表"""
         try:
             issues = self.api_client.get_issues()
             self.display_issues(issues)
@@ -353,15 +369,21 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "错误", f"获取问题列表失败: {str(e)}")
 
     def display_issues(self, issues):
-        """显示问题列表"""
         self.issues_table.setRowCount(len(issues))
-
         for row, issue in enumerate(issues):
             self.issues_table.setItem(row, 0, QTableWidgetItem(str(issue['id'])))
             self.issues_table.setItem(row, 1, QTableWidgetItem(issue['title']))
             self.issues_table.setItem(row, 2, QTableWidgetItem(issue.get('location', '')))
             self.issues_table.setItem(row, 3, QTableWidgetItem(issue['severity']))
-            self.issues_table.setItem(row, 4, QTableWidgetItem(issue['status']))
+            
+            status_item = QTableWidgetItem(issue['status'])
+            if issue['status'] == "已完成":
+                status_item.setForeground(QColor("#4CAF50"))
+            elif issue['status'] == "整改中":
+                status_item.setForeground(QColor("#FF9800"))
+            else:
+                status_item.setForeground(QColor("#f44336"))
+            self.issues_table.setItem(row, 4, status_item)
 
             responsible = issue.get('responsible_person', '')
             self.issues_table.setItem(row, 5, QTableWidgetItem(responsible))
@@ -374,13 +396,10 @@ class MainWindow(QMainWindow):
             self.issues_table.setItem(row, 7, QTableWidgetItem(str(issue['photo_count'])))
 
     def filter_issues(self):
-        """筛选问题"""
         status = self.status_filter.currentText()
         severity = self.severity_filter.currentText()
-
         status_param = None if status == "全部" else status
         severity_param = None if severity == "全部" else severity
-
         try:
             issues = self.api_client.get_issues(status_param, severity_param)
             self.display_issues(issues)
@@ -388,9 +407,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "错误", f"筛选失败: {str(e)}")
 
     def show_issue_detail(self, row, col):
-        """显示问题详情"""
         issue_id = int(self.issues_table.item(row, 0).text())
-
         try:
             issue = self.api_client.get_issue(issue_id)
             if issue:
@@ -400,7 +417,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "错误", f"获取问题详情失败: {str(e)}")
 
     def display_issue_detail(self, issue):
-        """显示问题详情"""
         self.detail_title.setText(issue['title'])
         self.detail_description.setText(issue.get('description', ''))
         self.detail_location.setText(issue.get('location', ''))
@@ -418,41 +434,34 @@ class MainWindow(QMainWindow):
             create_time = datetime.fromisoformat(create_time).strftime("%Y-%m-%d %H:%M")
         self.detail_create_time.setText(create_time)
 
-        # 显示照片列表
         self.issue_photos_list.clear()
         for photo in issue.get('issue_photos', []):
-            item = QListWidgetItem(f"{photo['id']}: {photo['file_name']}")
+            item = QListWidgetItem(f"{photo['file_name']}")
             item.setData(Qt.UserRole, photo['id'])
             self.issue_photos_list.addItem(item)
 
         self.rectification_photos_list.clear()
         for photo in issue.get('rectification_photos', []):
-            item = QListWidgetItem(f"{photo['id']}: {photo['file_name']}")
+            item = QListWidgetItem(f"{photo['file_name']}")
             item.setData(Qt.UserRole, photo['id'])
             self.rectification_photos_list.addItem(item)
 
     def show_photo_preview(self, item):
-        """显示照片预览"""
         photo_id = item.data(Qt.UserRole)
-
         try:
-            # 下载照片到临时文件
             temp_path = f"temp_photo_{photo_id}.jpg"
             if self.api_client.download_photo(photo_id, temp_path):
-                # 显示照片
                 pixmap = QPixmap(temp_path)
                 self.photo_preview.setPixmap(pixmap.scaled(
                     self.photo_preview.size(),
                     Qt.KeepAspectRatio,
                     Qt.SmoothTransformation
                 ))
-                # 删除临时文件
                 os.remove(temp_path)
         except Exception as e:
             QMessageBox.warning(self, "错误", f"加载照片失败: {str(e)}")
 
     def update_issue_status(self, status):
-        """更新问题状态"""
         if hasattr(self, 'current_issue'):
             try:
                 self.api_client.update_status(self.current_issue['id'], status)
@@ -462,20 +471,17 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "错误", f"更新状态失败: {str(e)}")
 
     def add_issue_dialog(self):
-        """新增问题对话框"""
         dialog = AddIssueDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             self.refresh_issues()
 
     def edit_issue_dialog(self):
-        """编辑问题对话框"""
         if hasattr(self, 'current_issue'):
             dialog = EditIssueDialog(self, self.current_issue)
             if dialog.exec_() == QDialog.Accepted:
                 self.refresh_issues()
 
     def delete_issue(self):
-        """删除问题"""
         if hasattr(self, 'current_issue'):
             reply = QMessageBox.question(
                 self, '确认删除',
@@ -483,7 +489,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
-
             if reply == QMessageBox.Yes:
                 try:
                     self.api_client.delete_issue(self.current_issue['id'])
@@ -493,13 +498,11 @@ class MainWindow(QMainWindow):
                     QMessageBox.warning(self, "错误", f"删除失败: {str(e)}")
 
     def upload_rectification_photo(self):
-        """上传整改照片"""
         if hasattr(self, 'current_issue'):
             files = QFileDialog.getOpenFileNames(
                 self, "选择整改照片", "",
                 "Images (*.png *.jpg *.jpeg *.bmp)"
             )
-
             if files[0]:
                 try:
                     photos = [(os.path.basename(f), f) for f in files[0]]
@@ -517,20 +520,16 @@ class MainWindow(QMainWindow):
                     QMessageBox.warning(self, "错误", f"上传失败: {str(e)}")
 
     def export_excel_dialog(self):
-        """导出Excel对话框"""
         file_path = QFileDialog.getSaveFileName(
             self, "保存Excel文件", "",
             "Excel (*.xlsx)"
         )
-
         if file_path[0]:
             try:
                 status = self.status_filter.currentText()
                 severity = self.severity_filter.currentText()
-
                 status_param = None if status == "全部" else status
                 severity_param = None if severity == "全部" else severity
-
                 content = self.api_client.export_excel(status_param, severity_param)
                 if content:
                     with open(file_path[0], 'wb') as f:
@@ -540,20 +539,16 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "错误", f"导出失败: {str(e)}")
 
     def export_excel_with_photos_dialog(self):
-        """导出Excel（带照片）对话框"""
         file_path = QFileDialog.getSaveFileName(
             self, "保存Excel文件（带照片）", "",
             "Excel (*.xlsx)"
         )
-
         if file_path[0]:
             try:
                 status = self.status_filter.currentText()
                 severity = self.severity_filter.currentText()
-
                 status_param = None if status == "全部" else status
                 severity_param = None if severity == "全部" else severity
-
                 content = self.api_client.export_excel_with_photos(status_param, severity_param)
                 if content:
                     with open(file_path[0], 'wb') as f:
@@ -562,8 +557,12 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"导出失败: {str(e)}")
 
+    def export_rectification_reply_dialog(self):
+        dialog = ExportReplyDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            QMessageBox.information(self, "成功", "整改回复已导出")
+
 class AddIssueDialog(QDialog):
-    """新增问题对话框"""
     def __init__(self, parent):
         super().__init__(parent)
         self.parent_window = parent
@@ -571,23 +570,31 @@ class AddIssueDialog(QDialog):
         self.init_ui()
 
     def init_ui(self):
-        """初始化界面"""
         self.setWindowTitle("新增问题")
-        self.setGeometry(300, 300, 600, 400)
+        self.setGeometry(300, 300, 600, 500)
 
         layout = QVBoxLayout()
         self.setLayout(layout)
 
-        # 表单
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout()
+        scroll_content.setLayout(scroll_layout)
+
         form = QFormLayout()
 
         self.title_input = QLineEdit()
+        self.title_input.setPlaceholderText("请输入问题标题")
         form.addRow("标题*:", self.title_input)
 
         self.description_input = QTextEdit()
+        self.description_input.setPlaceholderText("请输入问题描述")
+        self.description_input.setMaximumHeight(100)
         form.addRow("描述:", self.description_input)
 
         self.location_input = QLineEdit()
+        self.location_input.setPlaceholderText("请输入发现位置")
         form.addRow("位置:", self.location_input)
 
         self.severity_input = QComboBox()
@@ -596,6 +603,7 @@ class AddIssueDialog(QDialog):
         form.addRow("严重程度:", self.severity_input)
 
         self.responsible_input = QLineEdit()
+        self.responsible_input.setPlaceholderText("请输入责任人")
         form.addRow("责任人:", self.responsible_input)
 
         self.deadline_input = QDateEdit()
@@ -604,27 +612,27 @@ class AddIssueDialog(QDialog):
         form.addRow("整改期限:", self.deadline_input)
 
         self.notes_input = QTextEdit()
+        self.notes_input.setPlaceholderText("请输入备注信息")
+        self.notes_input.setMaximumHeight(80)
         form.addRow("备注:", self.notes_input)
 
-        layout.addLayout(form)
+        scroll_layout.addLayout(form)
 
-        # 照片选择
         photo_layout = QHBoxLayout()
         photo_layout.addWidget(QLabel("问题照片:"))
-
         select_photo_btn = QPushButton("选择照片")
         select_photo_btn.clicked.connect(self.select_photos)
         photo_layout.addWidget(select_photo_btn)
-
         self.photo_count_label = QLabel("已选择: 0张")
         photo_layout.addWidget(self.photo_count_label)
+        scroll_layout.addLayout(photo_layout)
 
-        layout.addLayout(photo_layout)
+        scroll_area.setWidget(scroll_content)
+        layout.addWidget(scroll_area)
 
-        # 按钮
         btn_layout = QHBoxLayout()
-
         save_btn = QPushButton("保存")
+        save_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px 16px; border-radius: 4px;")
         save_btn.clicked.connect(self.save_issue)
         btn_layout.addWidget(save_btn)
 
@@ -635,18 +643,15 @@ class AddIssueDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def select_photos(self):
-        """选择照片"""
         files = QFileDialog.getOpenFileNames(
             self, "选择问题照片", "",
             "Images (*.png *.jpg *.jpeg *.bmp)"
         )
-
         if files[0]:
             self.photos = [(os.path.basename(f), f) for f in files[0]]
             self.photo_count_label.setText(f"已选择: {len(self.photos)}张")
 
     def save_issue(self):
-        """保存问题"""
         if not self.title_input.text():
             QMessageBox.warning(self, "警告", "请填写标题")
             return
@@ -669,7 +674,6 @@ class AddIssueDialog(QDialog):
             QMessageBox.warning(self, "错误", f"创建失败: {str(e)}")
 
 class EditIssueDialog(QDialog):
-    """编辑问题对话框"""
     def __init__(self, parent, issue):
         super().__init__(parent)
         self.parent_window = parent
@@ -677,14 +681,18 @@ class EditIssueDialog(QDialog):
         self.init_ui()
 
     def init_ui(self):
-        """初始化界面"""
         self.setWindowTitle("编辑问题")
-        self.setGeometry(300, 300, 600, 400)
+        self.setGeometry(300, 300, 600, 500)
 
         layout = QVBoxLayout()
         self.setLayout(layout)
 
-        # 表单
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout()
+        scroll_content.setLayout(scroll_layout)
+
         form = QFormLayout()
 
         self.title_input = QLineEdit(self.issue['title'])
@@ -692,6 +700,7 @@ class EditIssueDialog(QDialog):
 
         self.description_input = QTextEdit()
         self.description_input.setText(self.issue.get('description', ''))
+        self.description_input.setMaximumHeight(100)
         form.addRow("描述:", self.description_input)
 
         self.location_input = QLineEdit(self.issue.get('location', ''))
@@ -714,14 +723,16 @@ class EditIssueDialog(QDialog):
 
         self.notes_input = QTextEdit()
         self.notes_input.setText(self.issue.get('notes', ''))
+        self.notes_input.setMaximumHeight(80)
         form.addRow("备注:", self.notes_input)
 
-        layout.addLayout(form)
+        scroll_layout.addLayout(form)
+        scroll_area.setWidget(scroll_content)
+        layout.addWidget(scroll_area)
 
-        # 按钮
         btn_layout = QHBoxLayout()
-
         save_btn = QPushButton("保存")
+        save_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px 16px; border-radius: 4px;")
         save_btn.clicked.connect(self.save_issue)
         btn_layout.addWidget(save_btn)
 
@@ -732,7 +743,6 @@ class EditIssueDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def save_issue(self):
-        """保存问题"""
         if not self.title_input.text():
             QMessageBox.warning(self, "警告", "请填写标题")
             return
@@ -754,9 +764,92 @@ class EditIssueDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "错误", f"更新失败: {str(e)}")
 
+class ExportReplyDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent_window = parent
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("导出整改回复")
+        self.setGeometry(300, 300, 500, 350)
+
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        form = QFormLayout()
+
+        self.project_name_input = QLineEdit()
+        self.project_name_input.setPlaceholderText("请输入项目名称")
+        form.addRow("项目名称*:", self.project_name_input)
+
+        self.project_responsible_input = QLineEdit()
+        self.project_responsible_input.setPlaceholderText("请输入项目负责人")
+        form.addRow("项目负责人*:", self.project_responsible_input)
+
+        self.reply_date_input = QDateEdit()
+        self.reply_date_input.setCalendarPopup(True)
+        self.reply_date_input.setDate(QDate.currentDate())
+        form.addRow("回复日期:", self.reply_date_input)
+
+        layout.addLayout(form)
+
+        btn_layout = QHBoxLayout()
+        export_btn = QPushButton("导出")
+        export_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px 16px; border-radius: 4px;")
+        export_btn.clicked.connect(self.export_reply)
+        btn_layout.addWidget(export_btn)
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+    def export_reply(self):
+        if not self.project_name_input.text():
+            QMessageBox.warning(self, "警告", "请填写项目名称")
+            return
+
+        file_path = QFileDialog.getSaveFileName(
+            self, "保存整改回复文件", "",
+            "Excel (*.xlsx)"
+        )
+
+        if file_path[0]:
+            try:
+                content = self.parent_window.api_client.export_rectification_reply(
+                    self.project_name_input.text(),
+                    self.project_responsible_input.text(),
+                    self.reply_date_input.date().toString("yyyy-MM-dd")
+                )
+                if content:
+                    with open(file_path[0], 'wb') as f:
+                        f.write(content)
+                    QMessageBox.information(self, "成功", "整改回复已导出")
+                    self.accept()
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"导出失败: {str(e)}")
+
 def main():
-    """主函数"""
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor(245, 245, 245))
+    palette.setColor(QPalette.WindowText, QColor(30, 30, 30))
+    palette.setColor(QPalette.Base, QColor(255, 255, 255))
+    palette.setColor(QPalette.AlternateBase, QColor(240, 240, 240))
+    palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 255))
+    palette.setColor(QPalette.ToolTipText, QColor(30, 30, 30))
+    palette.setColor(QPalette.Text, QColor(30, 30, 30))
+    palette.setColor(QPalette.Button, QColor(245, 245, 245))
+    palette.setColor(QPalette.ButtonText, QColor(30, 30, 30))
+    palette.setColor(QPalette.Link, QColor(33, 150, 243))
+    palette.setColor(QPalette.Highlight, QColor(33, 150, 243))
+    palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
+    app.setPalette(palette)
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())

@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel
 import io
 import os
 from datetime import datetime
@@ -15,6 +16,12 @@ from app.database import get_db
 from app.models import SafetyIssue
 
 router = APIRouter(prefix="/api/export", tags=["数据导出"])
+
+class RectificationReplyRequest(BaseModel):
+    project_name: str
+    project_responsible: str
+    reply_date: str
+    issue_ids: Optional[List[int]] = None
 
 @router.get("/excel")
 def export_to_excel(
@@ -343,6 +350,148 @@ def export_to_excel_with_photos(
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"安全问题_带照片_{timestamp}.xlsx"
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+    )
+
+
+@router.post("/rectification-reply")
+def export_rectification_reply(
+    request: RectificationReplyRequest,
+    db: Session = Depends(get_db)
+):
+    """导出安全隐患整改回复报告（POST方式，支持更多参数）"""
+    query = db.query(SafetyIssue)
+    if request.issue_ids:
+        query = query.filter(SafetyIssue.id.in_(request.issue_ids))
+
+    issues = query.order_by(SafetyIssue.create_time.desc()).all()
+
+    if not issues:
+        raise HTTPException(status_code=404, detail="没有可导出的问题")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "整改回复"
+
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+
+    ws.column_dimensions['A'].width = 20
+    ws.column_dimensions['B'].width = 60
+    ws.column_dimensions['C'].width = 60
+
+    title_font = Font(bold=True, size=16)
+    title_alignment = Alignment(horizontal="center", vertical="center")
+    header_font = Font(bold=True, size=11)
+    header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+
+    current_row = 1
+
+    ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=3)
+    title_cell = ws.cell(row=current_row, column=1, value="《关于安全隐患整改有关事项回复》")
+    title_cell.font = title_font
+    title_cell.alignment = title_alignment
+    ws.row_dimensions[current_row].height = 35
+    current_row += 1
+
+    def add_info_row(label, value):
+        nonlocal current_row
+        ws.cell(row=current_row, column=1, value=label).font = header_font
+        ws.cell(row=current_row, column=2, value=value)
+        ws.merge_cells(start_row=current_row, start_column=2, end_row=current_row, end_column=3)
+        ws.row_dimensions[current_row].height = 25
+        for col in range(1, 4):
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+
+    add_info_row("项目名称", request.project_name)
+    add_info_row("项目负责人", request.project_responsible)
+
+    for idx, issue in enumerate(issues, 1):
+        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=3)
+        ws.cell(row=current_row, column=1, value=f"隐患事项{idx}：{issue.title}").font = Font(bold=True, size=11)
+        ws.row_dimensions[current_row].height = 25
+        for col in range(1, 4):
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+
+        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=3)
+        ws.cell(row=current_row, column=1, value=f"整改措施：{issue.notes if issue.notes else '已整改'}")
+        ws.row_dimensions[current_row].height = 25
+        for col in range(1, 4):
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+
+        ws.cell(row=current_row, column=1, value="整改前照片：").font = header_font
+        ws.cell(row=current_row, column=2, value="")
+        ws.cell(row=current_row, column=3, value="整改后照片：").font = header_font
+        for col in range(1, 4):
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+
+        issue_photos = [p for p in issue.photos if p.photo_type == "问题照片"]
+        rect_photos = [p for p in issue.photos if p.photo_type == "整改照片"]
+
+        max_photos = max(len(issue_photos), len(rect_photos), 1)
+        photo_height = 150
+
+        for photo_idx in range(max_photos):
+            ws.cell(row=current_row, column=1, value="")
+            ws.cell(row=current_row, column=2, value="")
+            ws.cell(row=current_row, column=3, value="")
+
+            if photo_idx < len(issue_photos):
+                photo = issue_photos[photo_idx]
+                try:
+                    if os.path.exists(photo.file_path):
+                        img = XLImage(photo.file_path)
+                        img.width = 180
+                        img.height = 140
+                        ws.add_image(img, f'B{current_row}')
+                except Exception as e:
+                    print(f"Error adding image {photo.file_path}: {e}")
+
+            if photo_idx < len(rect_photos):
+                photo = rect_photos[photo_idx]
+                try:
+                    if os.path.exists(photo.file_path):
+                        img = XLImage(photo.file_path)
+                        img.width = 180
+                        img.height = 140
+                        ws.add_image(img, f'C{current_row}')
+                except Exception as e:
+                    print(f"Error adding image {photo.file_path}: {e}")
+
+            ws.row_dimensions[current_row].height = photo_height
+            for col in range(1, 4):
+                ws.cell(row=current_row, column=col).border = thin_border
+            current_row += 1
+
+        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=3)
+        ws.cell(row=current_row, column=1, value="整改事项回复")
+        ws.row_dimensions[current_row].height = photo_height
+        for col in range(1, 4):
+            ws.cell(row=current_row, column=col).border = thin_border
+        current_row += 1
+
+        current_row += 1
+
+    add_info_row("回复日期", request.reply_date)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"安全隐患整改回复_{timestamp}.xlsx"
 
     return StreamingResponse(
         output,
