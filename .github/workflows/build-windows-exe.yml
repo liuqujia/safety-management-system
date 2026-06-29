@@ -1,0 +1,78 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: false
+        default: ''
+  push:
+    branches:
+      - main
+    paths:
+      - 'windows-client/**'
+      - '.github/workflows/build-windows-exe.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r windows-client/requirements.txt
+
+      - name: Build with PyInstaller
+        run: |
+          cd windows-client
+          pyinstaller safety_management.spec --noconfirm
+          dir dist
+
+      - name: Rename exe with version
+        run: |
+          $tag = "${{ github.event.inputs.tag }}"
+          if (-not $tag) {
+            $tag = "${{ github.run_number }}"
+          }
+          $oldName = "windows-client\dist\安全整改管理系统.exe"
+          $newName = "windows-client\dist\安全整改管理系统_$tag.exe"
+          if (Test-Path $oldName) {
+            Move-Item $oldName $newName -Force
+            Write-Host "Renamed to: $newName"
+          }
+
+      - name: Create zip package
+        run: |
+          Compress-Archive -Path "windows-client\dist\*" -DestinationPath "windows-client\safety-management-exe.zip" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: safety-management-exe
+          path: windows-client/dist/安全整改管理系统_*.exe
+          retention-days: 30
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: safety-management-exe-zip
+          path: windows-client/safety-management-exe.zip
+          retention-days: 30
+
+      - name: Upload to Release
+        if: github.event.inputs.tag != ''
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          files: windows-client/dist/安全整改管理系统_*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

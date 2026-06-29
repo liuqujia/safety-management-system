@@ -1,13 +1,43 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys
+import os
 
 block_cipher = None
 
+# 解决 Windows 路径中文问题
+sys.stdout.reconfigure(encoding='utf-8')
+
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=[os.path.abspath('.')],
     binaries=[],
     datas=[],
-    hiddenimports=['PyQt5', 'PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 'requests', 'openpyxl', 'PIL', 'PIL.Image'],
+    hiddenimports=[
+        'PyQt5',
+        'PyQt5.QtCore',
+        'PyQt5.QtGui',
+        'PyQt5.QtWidgets',
+        'PyQt5.sip',
+        'requests',
+        'urllib3',
+        'charset_normalizer',
+        'idna',
+        'certifi',
+        'openpyxl',
+        'et_xmlfile',
+        'PIL',
+        'PIL.Image',
+        'PIL._imaging',
+        'dateutil',
+        'dateutil.parser',
+        'dateutil.relativedelta',
+        'dateutil.rrule',
+        'python_dotenv',
+        'json',
+        'io',
+        'datetime',
+        'locale',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -41,4 +71,6 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=None,
+    # 解决 Windows 编码问题
+    encoding_args=True,
 )
