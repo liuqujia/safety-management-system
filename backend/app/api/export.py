@@ -449,12 +449,13 @@ def export_rectification_reply(
         ws.row_dimensions[current_row].height = 22
         current_row += 1
 
-        # 行 D：照片（合并 B:C / D:E），标签写在格子的左上角
-        ws.merge_cells(f'B{current_row}:C{current_row}')
-        ws.merge_cells(f'D{current_row}:E{current_row}')
+        # 行 D-E：照片（合并 B:D / D:E 各两行），标签在左上角
+        ws.merge_cells(f'B{current_row}:C{current_row + 1}')
+        ws.merge_cells(f'D{current_row}:E{current_row + 1}')
         for col in range(1, 6):
             ws.cell(row=current_row, column=col).border = thin_border
-        # 照片格左上角写标签
+            ws.cell(row=current_row + 1, column=col).border = thin_border
+        # 标签写在左上角（top-left）
         cell_b = ws.cell(row=current_row, column=2, value="整改前照片：")
         cell_b.font = header_font
         cell_b.alignment = top_left_alignment
@@ -470,7 +471,7 @@ def export_rectification_reply(
                 if os.path.exists(issue_photos[0].file_path):
                     img = XLImage(issue_photos[0].file_path)
                     img.width = 150
-                    img.height = 100
+                    img.height = 120
                     ws.add_image(img, f'B{current_row}')
             except Exception:
                 pass
@@ -480,13 +481,14 @@ def export_rectification_reply(
                 if os.path.exists(rect_photos[0].file_path):
                     img = XLImage(rect_photos[0].file_path)
                     img.width = 150
-                    img.height = 100
+                    img.height = 120
                     ws.add_image(img, f'D{current_row}')
             except Exception:
                 pass
 
-        ws.row_dimensions[current_row].height = 106
-        current_row += 1
+        ws.row_dimensions[current_row].height = 22
+        ws.row_dimensions[current_row + 1].height = 106
+        current_row += 2
 
     # ── 最后：回复日期 ────────────────────────────────────────────────────────
     ws.cell(row=current_row, column=1, value="回复日期").font = header_font

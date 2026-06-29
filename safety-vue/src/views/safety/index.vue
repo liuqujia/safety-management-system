@@ -37,49 +37,64 @@
       </div>
     </div>
 
-    <!-- 问题列表 -->
-    <el-table :data="issueList" border stripe v-loading="loading">
-      <el-table-column prop="id" label="序号" width="70" align="center" />
-      <el-table-column prop="project_name" label="项目名称" width="180" show-overflow-tooltip>
-        <template #default="{ row }">
-          <span v-if="row.project_name">{{ row.project_name }}</span>
-          <span v-else style="color: #c0c4cc">未提供</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="title" label="问题标题" min-width="220" show-overflow-tooltip />
-      <el-table-column prop="location" label="发现位置" width="150" show-overflow-tooltip />
-      <el-table-column prop="severity" label="严重程度" width="100" align="center">
-        <template #default="{ row }">
-          <el-tag :type="getSeverityType(row.severity)">{{ row.severity }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="status" label="状态" width="100" align="center">
-        <template #default="{ row }">
-          <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="responsible_person" label="责任人" width="120" />
-      <el-table-column prop="deadline" label="整改期限" width="120" />
-      <el-table-column prop="photo_count" label="照片数" width="80" align="center" />
-      <el-table-column label="操作" width="250" fixed="right" align="center">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="handleView(row)">查看</el-button>
-          <el-button link type="primary" @click="handleEdit(row)">编辑</el-button>
-          <el-button link type="success" @click="handleUploadPhoto(row)">上传整改照片</el-button>
-          <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <!-- 项目分组问题列表 -->
+    <div class="project-groups" v-loading="loading">
+      <!-- 没有结果 -->
+      <el-empty v-if="!loading && filteredProjects.length === 0" description="暂无数据" />
+      
+      <!-- 全部项目折叠/展开按钮 -->
+      <div v-if="filteredProjects.length > 1" class="expand-all-bar">
+        <el-button text size="small" @click="expandAll = !expandAll">
+          {{ expandAll ? '折叠全部' : '展开全部' }}
+        </el-button>
+        <span class="project-count">共 {{ filteredProjects.length }} 个项目</span>
+      </div>
 
-    <!-- 分页 -->
-    <el-pagination
-      v-model:current-page="queryParams.page"
-      v-model:page-size="queryParams.limit"
-      :total="total"
-      layout="total, sizes, prev, pager, next, jumper"
-      @size-change="getList"
-      @current-change="getList"
-    />
+      <!-- 每个项目一个折叠面板 -->
+      <div v-for="group in filteredProjects" :key="group.project_name" class="project-group">
+        <div class="project-header" :class="{ expanded: expandedProjects[group.project_name] }" @click="toggleProject(group.project_name)">
+          <div class="project-info">
+            <span class="project-icon">{{ expandedProjects[group.project_name] ? '📂' : '📁' }}</span>
+            <span class="project-name">{{ group.project_name || '未分类' }}</span>
+            <el-tag size="small" type="info" class="issue-count">{{ group.issues.length }} 条隐患</el-tag>
+          </div>
+          <div class="project-actions" @click.stop>
+            <el-button size="small" type="warning" icon="Document" @click="exportProjectReply(group)" plain>导出整改回复</el-button>
+          </div>
+          <span class="expand-icon">{{ expandedProjects[group.project_name] ? '▲' : '▼' }}</span>
+        </div>
+        
+        <el-collapse-transition>
+          <div v-show="expandedProjects[group.project_name]" class="project-body">
+            <el-table :data="group.issues" border stripe size="small" :show-header="group.issues.length > 0">
+              <el-table-column prop="id" label="序号" width="60" align="center" />
+              <el-table-column prop="title" label="问题内容" min-width="220" show-overflow-tooltip />
+              <el-table-column prop="location" label="发现位置" width="140" show-overflow-tooltip />
+              <el-table-column prop="severity" label="严重程度" width="90" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="getSeverityType(row.severity)">{{ row.severity }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="status" label="状态" width="90" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="responsible_person" label="责任人" width="100" />
+              <el-table-column prop="photo_count" label="照片" width="60" align="center" />
+              <el-table-column label="操作" width="200" fixed="right" align="center">
+                <template #default="{ row }">
+                  <el-button link type="primary" @click="handleView(row)">查看</el-button>
+                  <el-button link type="primary" @click="handleEdit(row)">编辑</el-button>
+                  <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="group.issues.length === 0" description="暂无隐患" />
+          </div>
+        </el-collapse-transition>
+      </div>
+    </div>
 
     <!-- 新增/编辑对话框 -->
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="600px" @close="handleDialogClose">
@@ -326,7 +341,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, UploadFilled, ArrowDown, Close } from '@element-plus/icons-vue'
 import {
@@ -404,6 +419,56 @@ const form = reactive({
 const rules = {
   title: [{ required: true, message: '请输入问题标题', trigger: 'blur' }]
 }
+
+// ── 项目分组状态 ──────────────────────────────────────────────────────
+const expandedProjects = reactive({})  // { project_name: true/false }
+const expandAll = ref(true)
+
+// 计算属性：按项目分组
+const filteredProjects = computed(() => {
+  const groups = {}
+  for (const issue of issueList.value) {
+    const name = issue.project_name || '未分类'
+    if (!groups[name]) {
+      groups[name] = { project_name: name, issues: [] }
+      if (expandedProjects[name] === undefined) {
+        expandedProjects[name] = true
+      }
+    }
+    groups[name].issues.push(issue)
+  }
+  // 排序：项目名称字母序
+  return Object.values(groups).sort((a, b) => a.project_name.localeCompare(b.project_name, 'zh'))
+})
+
+const toggleProject = (name) => {
+  expandedProjects[name] = !expandedProjects[name]
+}
+
+const exportProjectReply = (group) => {
+  replyForm.project_name = group.project_name || ''
+  replyForm.project_responsible = ''
+  replyForm.reply_date = ''
+  replyForm.issue_ids = group.issues.map(i => i.id)
+  replyDialogVisible.value = true
+}
+
+// 折叠/展开全部
+watch(expandAll, (val) => {
+  for (const key of Object.keys(expandedProjects)) {
+    expandedProjects[key] = val
+  }
+})
+
+// 首次加载时全部展开
+watch(issueList, () => {
+  for (const key of Object.keys(expandedProjects)) {
+    expandedProjects[key] = true
+  }
+}, { immediate: true })
+
+// ── 导入 word 需要 computed ──────────────────────────────────────────────
+
 
 onMounted(() => {
   getList()
@@ -738,6 +803,81 @@ const getPhotoUrl = (photoId) => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* 项目分组视图 */
+.project-groups {
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.expand-all-bar {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  background: #fafafa;
+  border-bottom: 1px solid #ebeef5;
+}
+.project-count {
+  margin-left: 12px;
+  font-size: 12px;
+  color: #909399;
+}
+.project-group {
+  border-bottom: 1px solid #ebeef5;
+}
+.project-group:last-child {
+  border-bottom: none;
+}
+.project-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  cursor: pointer;
+  background: #f9f9fb;
+  transition: background 0.2s;
+  user-select: none;
+}
+.project-header:hover {
+  background: #f0f2f5;
+}
+.project-header.expanded {
+  background: #eef1f5;
+}
+.project-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.project-icon {
+  font-size: 18px;
+}
+.project-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #303133;
+}
+.issue-count {
+  margin-left: 4px;
+}
+.project-actions {
+  display: flex;
+  gap: 8px;
+}
+.expand-icon {
+  font-size: 12px;
+  color: #909399;
+}
+.project-body {
+  padding: 0;
+  border-top: 1px solid #ebeef5;
+}
+.project-body :deep(.el-table__header-wrapper) {
+  display: none;
+}
+.project-body :deep(.el-table__body-wrapper) {
+  border-bottom: none;
 }
 .photos-section {
   margin-top: 20px;
