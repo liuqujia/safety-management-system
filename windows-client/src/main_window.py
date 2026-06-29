@@ -270,7 +270,7 @@ class MainWindow(QMainWindow):
         self.issues_table = QTableWidget()
         self.issues_table.setColumnCount(8)
         self.issues_table.setHorizontalHeaderLabels([
-            "ID", "问题标题", "发现位置", "严重程度", "状态", "责任人", "创建时间", "照片数"
+            "序号", "项目名称", "问题内容", "严重程度", "责任人", "整改状态", "照片数量", "创建时间"
         ])
         self.issues_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.issues_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -413,9 +413,17 @@ class MainWindow(QMainWindow):
         self.issues_table.setRowCount(len(issues))
         for row, issue in enumerate(issues):
             self.issues_table.setItem(row, 0, QTableWidgetItem(str(issue['id'])))
-            self.issues_table.setItem(row, 1, QTableWidgetItem(issue['title']))
-            self.issues_table.setItem(row, 2, QTableWidgetItem(issue.get('location', '')))
+            self.issues_table.setItem(row, 1, QTableWidgetItem(issue.get('project_name', '')))
+            
+            content = issue['title']
+            if issue.get('description'):
+                content += f"\n{issue['description'][:50]}"
+            self.issues_table.setItem(row, 2, QTableWidgetItem(content))
+            
             self.issues_table.setItem(row, 3, QTableWidgetItem(issue['severity']))
+            
+            responsible = issue.get('responsible_person', '')
+            self.issues_table.setItem(row, 4, QTableWidgetItem(responsible))
             
             status_item = QTableWidgetItem(issue['status'])
             if issue['status'] == "已完成":
@@ -424,17 +432,14 @@ class MainWindow(QMainWindow):
                 status_item.setForeground(QColor("#FF9800"))
             else:
                 status_item.setForeground(QColor("#f44336"))
-            self.issues_table.setItem(row, 4, status_item)
+            self.issues_table.setItem(row, 5, status_item)
 
-            responsible = issue.get('responsible_person', '')
-            self.issues_table.setItem(row, 5, QTableWidgetItem(responsible))
+            self.issues_table.setItem(row, 6, QTableWidgetItem(str(issue['photo_count'])))
 
             create_time = issue.get('create_time', '')
             if create_time:
                 create_time = datetime.fromisoformat(create_time).strftime("%Y-%m-%d %H:%M")
-            self.issues_table.setItem(row, 6, QTableWidgetItem(create_time))
-
-            self.issues_table.setItem(row, 7, QTableWidgetItem(str(issue['photo_count'])))
+            self.issues_table.setItem(row, 7, QTableWidgetItem(create_time))
 
     def filter_issues(self):
         status = self.status_filter.currentText()

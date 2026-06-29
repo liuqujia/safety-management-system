@@ -177,8 +177,6 @@ def export_to_excel(
     template_id: int = 1,
     db: Session = Depends(get_db)
 ):
-    template = next((t for t in templates if t["id"] == template_id), templates[0])
-    
     query = db.query(SafetyIssue)
     if status:
         query = query.filter(SafetyIssue.status == status)
@@ -192,7 +190,7 @@ def export_to_excel(
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "安全问题"
+    ws.title = "隐患检查表"
 
     column_widths = {
         'A': 8,   'B': 30, 'C': 40, 'D': 50, 'E': 40, 'F': 20,
@@ -200,20 +198,54 @@ def export_to_excel(
     for col, width in column_widths.items():
         ws.column_dimensions[col].width = width
 
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=12)
     header_alignment = Alignment(horizontal="center", vertical="center")
+    normal_font = Font(size=11)
 
-    headers = template.get("columns", ["序号", "现场图片", "检查发现的主要隐患或问题", "法规名称、代码和条款号", "整改措施或建议", "备注"])
+    project_name = issues[0].project_name if issues[0].project_name else "未填写"
+    check_time = datetime.now().strftime("%Y.%m.%d")
+
+    current_row = 1
+    ws.merge_cells(f'A{current_row}:F{current_row}')
+    title_cell = ws.cell(row=current_row, column=1, value="委托项目安全生产隐患检查表")
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = header_alignment
+    ws.row_dimensions[current_row].height = 35
+    current_row += 1
+
+    ws.merge_cells(f'A{current_row}:F{current_row}')
+    info_text = f"企业名称：    {project_name}              隐患条数：  {len(issues)}  条                      检查时间：  {check_time}"
+    ws.cell(row=current_row, column=1, value=info_text).font = normal_font
+    ws.row_dimensions[current_row].height = 25
+    current_row += 1
+
+    ws.merge_cells(f'A{current_row}:F{current_row}')
+    note_text = "注：1.发现的主要内容或问题应配有图片和文字描述（时间、地点（位置）、现状或情形）；2.表中"法规"泛指国家法律法规、规章、标准和规范以及被检查企业安全生产管理规章制度、操作规程等；3.表中"整改措施或建议"可包括整改措施、时限和预案等内容。"
+    ws.cell(row=current_row, column=1, value=note_text).font = Font(size=10)
+    ws.row_dimensions[current_row].height = 40
+    current_row += 1
+
+    headers = ["序号", "现场图片", "检查发现的主要隐患或问题", "法规名称、代码和条款号", "整改措施或建议", "备注"]
     for col_num, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col_num, value=header)
+        cell = ws.cell(row=current_row, column=col_num, value=header)
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = header_alignment
+        cell.border = thin_border
+    ws.row_dimensions[current_row].height = 25
+    current_row += 1
 
-    current_row = 2
     for idx, issue in enumerate(issues, 1):
-        ws.cell(row=current_row, column=1, value=idx)
+        ws.cell(row=current_row, column=1, value=idx).border = thin_border
+        ws.cell(row=current_row, column=1).alignment = center_alignment
         
         issue_photos = [p for p in issue.photos if p.photo_type == "问题照片"]
         if issue_photos:
@@ -221,31 +253,23 @@ def export_to_excel(
             try:
                 if os.path.exists(photo.file_path):
                     img = XLImage(photo.file_path)
-                    img.width = 100
-                    img.height = 80
+                    img.width = 120
+                    img.height = 90
                     ws.add_image(img, f'B{current_row}')
             except Exception as e:
                 pass
         
-        ws.cell(row=current_row, column=3, value=issue.title)
-        ws.cell(row=current_row, column=4, value=issue.description)
-        ws.cell(row=current_row, column=5, value=issue.notes)
+        ws.cell(row=current_row, column=2, value="").border = thin_border
+        ws.cell(row=current_row, column=3, value=issue.title).border = thin_border
+        ws.cell(row=current_row, column=4, value=issue.description).border = thin_border
+        ws.cell(row=current_row, column=5, value=issue.notes if issue.notes else "").border = thin_border
         
-        remark_parts = []
-        if issue.severity:
-            remark_parts.append(f"严重程度: {issue.severity}")
+        deadline_str = ""
         if issue.deadline:
-            remark_parts.append(f"整改时限: {issue.deadline.isoformat()}")
-        if issue.status:
-            remark_parts.append(f"状态: {issue.status}")
-        if issue.responsible_person:
-            remark_parts.append(f"责任人: {issue.responsible_person}")
-        if issue.location:
-            remark_parts.append(f"位置: {issue.location}")
+            deadline_str = f"整改时限：{issue.deadline.month}月{issue.deadline.day}日"
+        ws.cell(row=current_row, column=6, value=deadline_str).border = thin_border
         
-        ws.cell(row=current_row, column=6, value="; ".join(remark_parts))
-        
-        ws.row_dimensions[current_row].height = 80
+        ws.row_dimensions[current_row].height = 100
         current_row += 1
 
     output = io.BytesIO()
