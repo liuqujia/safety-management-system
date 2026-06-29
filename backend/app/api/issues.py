@@ -6,6 +6,7 @@ import os
 import uuid
 from PIL import Image
 import io
+import re
 
 from app.database import get_db
 from app.models import SafetyIssue, Photo
@@ -22,7 +23,6 @@ def get_issues(
     severity: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """获取问题列表"""
     query = db.query(SafetyIssue)
 
     if status:
@@ -35,7 +35,6 @@ def get_issues(
 
 @router.get("/{issue_id}", response_model=IssueResponse)
 def get_issue(issue_id: int, db: Session = Depends(get_db)):
-    """获取单个问题详情"""
     issue = db.query(SafetyIssue).filter(SafetyIssue.id == issue_id).first()
     if not issue:
         raise HTTPException(status_code=404, detail="问题不存在")
@@ -43,7 +42,6 @@ def get_issue(issue_id: int, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=IssueResponse)
 def create_issue(issue: IssueCreate, db: Session = Depends(get_db)):
-    """创建问题"""
     db_issue = SafetyIssue(**issue.dict())
     db.add(db_issue)
     db.commit()
@@ -62,8 +60,6 @@ async def create_issue_with_photos(
     photos: List[UploadFile] = File([]),
     db: Session = Depends(get_db)
 ):
-    """创建问题并上传照片"""
-    # 创建问题
     db_issue = SafetyIssue(
         title=title,
         description=description,
@@ -77,7 +73,6 @@ async def create_issue_with_photos(
     db.commit()
     db.refresh(db_issue)
 
-    # 上传照片
     for photo in photos:
         if photo.filename:
             file_path, file_name = await save_upload_file(photo, db_issue.id, "问题照片")
@@ -95,7 +90,6 @@ async def create_issue_with_photos(
 
 @router.put("/{issue_id}", response_model=IssueResponse)
 def update_issue(issue_id: int, issue: IssueUpdate, db: Session = Depends(get_db)):
-    """更新问题"""
     db_issue = db.query(SafetyIssue).filter(SafetyIssue.id == issue_id).first()
     if not db_issue:
         raise HTTPException(status_code=404, detail="问题不存在")
@@ -110,12 +104,10 @@ def update_issue(issue_id: int, issue: IssueUpdate, db: Session = Depends(get_db
 
 @router.delete("/{issue_id}")
 def delete_issue(issue_id: int, db: Session = Depends(get_db)):
-    """删除问题"""
     db_issue = db.query(SafetyIssue).filter(SafetyIssue.id == issue_id).first()
     if not db_issue:
         raise HTTPException(status_code=404, detail="问题不存在")
 
-    # 删除关联的照片文件
     for photo in db_issue.photos:
         if os.path.exists(photo.file_path):
             os.remove(photo.file_path)
@@ -131,7 +123,6 @@ async def upload_photo(
     photos: List[UploadFile] = File(...),
     db: Session = Depends(get_db)
 ):
-    """上传照片到问题"""
     db_issue = db.query(SafetyIssue).filter(SafetyIssue.id == issue_id).first()
     if not db_issue:
         raise HTTPException(status_code=404, detail="问题不存在")
@@ -157,7 +148,6 @@ def update_status(
     status: str,
     db: Session = Depends(get_db)
 ):
-    """更新问题状态"""
     db_issue = db.query(SafetyIssue).filter(SafetyIssue.id == issue_id).first()
     if not db_issue:
         raise HTTPException(status_code=404, detail="问题不存在")
@@ -169,6 +159,7 @@ def update_status(
     db.commit()
     db.refresh(db_issue)
     return db_issue.to_dict()
+
 @router.post("/import-from-word")
 async def import_from_word(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
@@ -181,51 +172,84 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
         errors = []
         project_name = ""
         
-        for paragraph in doc.paragraphs:
-            if "企业名称" in paragraph.text:
-                project_name = paragraph.text.replace("企业名称：", "").replace("企业名称:", "").strip()
+        debug_info = []
         
-        for table in doc.tables:
+        for paragraph in doc.paragraphs:
+            text = paragraph.text.strip()
+            if text:
+                debug_info.append(f"段落: {text[:100]}")
+            if "企业名称" in text:
+                project_name = text.replace("企业名称：", "").replace("企业名称:", "").strip()
+            if "项目名称" in text:
+                project_name = text.replace("项目名称：", "").replace("项目名称:", "").strip()
+        
+        debug_info.append(f"项目名称: {project_name}")
+        debug_info.append(f"表格数量: {len(doc.tables)}")
+        
+        for table_idx, table in enumerate(doc.tables):
+            debug_info.append(f"表格{table_idx}: {len(table.rows)}行 x {len(table.columns)}列")
             for row_idx, row in enumerate(table.rows):
+                cells = row.cells
+                row_texts = []
+                for cell_idx, cell in enumerate(cells):
+                    cell_text = cell.text.strip()
+                    row_texts.append(f"[{cell_idx}]={cell_text[:50]}")
+                debug_info.append(f"  行{row_idx}: {', '.join(row_texts)}")
+                
                 if row_idx == 0:
                     continue
                 
                 try:
-                    cells = row.cells
-                    if len(cells) < 6:
-                        continue
-                    
-                    title = cells[2].text.strip() if len(cells) > 2 else ""
-                    if not title:
-                        continue
-                    
-                    description = cells[3].text.strip() if len(cells) > 3 else ""
-                    rectification = cells[4].text.strip() if len(cells) > 4 else ""
-                    remarks = cells[5].text.strip() if len(cells) > 5 else ""
-                    
+                    title = ""
+                    description = ""
+                    notes = ""
                     deadline = None
-                    if "时限" in remarks:
-                        import re
-                        match = re.search(r'(\d+月\d+日)', remarks)
-                        if match:
-                            deadline = match.group(1)
                     
-                    issue_data = {
-                        'title': title,
-                        'description': description,
-                        'location': '',
-                        'severity': '一般',
-                        'deadline': deadline,
-                        'project_name': project_name,
-                        'responsible_person': '',
-                        'status': '待整改'
-                    }
+                    for cell in cells:
+                        cell_text = cell.text.strip()
+                        if cell_text:
+                            if "隐患" in cell_text or "问题" in cell_text or len(cell_text) > 10:
+                                if not title:
+                                    title = cell_text
+                                else:
+                                    description = description + "\n" + cell_text
+                            elif "法规" in cell_text or "条款" in cell_text or "标准" in cell_text:
+                                description = description + "\n" + cell_text
+                            elif "整改" in cell_text:
+                                notes = notes + "\n" + cell_text
+                            elif "时限" in cell_text or "期限" in cell_text:
+                                match = re.search(r'(\d+月\d+日)', cell_text)
+                                if match:
+                                    deadline = match.group(1)
                     
-                    db_issue = SafetyIssue(**issue_data)
-                    db.add(db_issue)
-                    db.commit()
-                    db.refresh(db_issue)
-                    imported_count += 1
+                    if not title:
+                        for cell in cells:
+                            cell_text = cell.text.strip()
+                            if cell_text and len(cell_text) > 5:
+                                title = cell_text
+                                break
+                    
+                    if title:
+                        issue_data = {
+                            'title': title[:200],
+                            'description': description[:500] if description else None,
+                            'location': '',
+                            'severity': '一般',
+                            'deadline': deadline,
+                            'project_name': project_name,
+                            'responsible_person': '',
+                            'status': '待整改',
+                            'notes': notes[:500] if notes else None
+                        }
+                        
+                        db_issue = SafetyIssue(**issue_data)
+                        db.add(db_issue)
+                        db.commit()
+                        db.refresh(db_issue)
+                        imported_count += 1
+                        debug_info.append(f"  -> 成功导入: {title[:50]}")
+                    else:
+                        debug_info.append(f"  -> 跳过（无标题）")
                 except Exception as e:
                     errors.append(f"第{row_idx}行导入失败: {str(e)}")
         
@@ -234,7 +258,11 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
         return {
             'success': True,
             'imported_count': imported_count,
-            'errors': errors
+            'errors': errors,
+            'project_name': project_name,
+            'tables_found': len(doc.tables),
+            'paragraphs_count': len(doc.paragraphs),
+            'debug': debug_info[:50]
         }
     except Exception as e:
         return {'success': False, 'message': str(e)}

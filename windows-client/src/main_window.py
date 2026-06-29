@@ -542,14 +542,25 @@ class MainWindow(QMainWindow):
         if file_path[0]:
             try:
                 result = self.api_client.import_from_word(file_path[0])
-                if result and result.get('success'):
-                    QMessageBox.information(
-                        self, "成功",
-                        f"成功导入{result['imported_count']}条记录"
-                    )
-                    self.refresh_issues()
+                if result:
+                    if result.get('success'):
+                        msg = f"成功导入{result['imported_count']}条记录\n\n"
+                        msg += f"项目名称: {result.get('project_name', '')}\n"
+                        msg += f"表格数量: {result.get('tables_found', 0)}\n"
+                        msg += f"段落数量: {result.get('paragraphs_count', 0)}\n"
+                        
+                        debug = result.get('debug', [])
+                        if debug:
+                            msg += "\n--- 调试信息 ---\n"
+                            for line in debug:
+                                msg += line + "\n"
+                        
+                        QMessageBox.information(self, "导入结果", msg)
+                        self.refresh_issues()
+                    else:
+                        QMessageBox.warning(self, "导入失败", result.get('message', '未知错误'))
                 else:
-                    QMessageBox.warning(self, "导入失败", result.get('message', '未知错误'))
+                    QMessageBox.warning(self, "导入失败", "API返回为空")
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"导入失败: {str(e)}")
 
