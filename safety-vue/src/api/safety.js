@@ -199,3 +199,36 @@ export function importFromWord(formData) {
     }
   })
 }
+
+/**
+ * @description 预览 Word 文档（不写库），返回识别到的项目名称和隐患条目
+ * @param {FormData} formData
+ */
+export function previewFromWord(formData) {
+  return request({
+    url: '/api/issues/preview-from-word',
+    method: 'post',
+    data: formData,
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+}
+
+/**
+ * @description 获取所有项目名称
+ */
+export function getProjects() {
+  return request({
+    url: '/api/issues/projects/list',
+    method: 'get'
+  })
+}
+
+/**
+ * @description 获取整改回复报告（与 exportRectificationReply 同义，语义化）
+ * @param {Object} data
+ */
+export function exportReplyReport(data) {
+  return exportRectificationReply(data)
+}

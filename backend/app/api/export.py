@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/export", tags=["数据导出"])
 # 对齐方式（供多处复用）
 center_alignment = Alignment(horizontal="center", vertical="center")
 left_alignment = Alignment(horizontal="left", vertical="center")
+top_left_alignment = Alignment(horizontal="left", vertical="top")
 
 
 def _get_or_create_default_templates(db: Session) -> List[dict]:
@@ -448,23 +449,18 @@ def export_rectification_reply(
         ws.row_dimensions[current_row].height = 22
         current_row += 1
 
-        # 行 D：照片标签
-        ws.cell(row=current_row, column=2, value="整改前照片：").font = header_font
-        ws.cell(row=current_row, column=2).alignment = left_alignment
-        ws.cell(row=current_row, column=3).border = thin_border
-        ws.cell(row=current_row, column=4, value="整改后照片：").font = header_font
-        ws.cell(row=current_row, column=4).alignment = left_alignment
-        ws.cell(row=current_row, column=5).border = thin_border
-        for col in range(1, 6):
-            ws.cell(row=current_row, column=col).border = thin_border
-        ws.row_dimensions[current_row].height = 19
-        current_row += 1
-
-        # 行 E：照片（合并 B:C / D:E）
+        # 行 D：照片（合并 B:C / D:E），标签写在格子的左上角
         ws.merge_cells(f'B{current_row}:C{current_row}')
         ws.merge_cells(f'D{current_row}:E{current_row}')
         for col in range(1, 6):
             ws.cell(row=current_row, column=col).border = thin_border
+        # 照片格左上角写标签
+        cell_b = ws.cell(row=current_row, column=2, value="整改前照片：")
+        cell_b.font = header_font
+        cell_b.alignment = top_left_alignment
+        cell_d = ws.cell(row=current_row, column=4, value="整改后照片：")
+        cell_d.font = header_font
+        cell_d.alignment = top_left_alignment
 
         issue_photos = [p for p in issue.photos if p.photo_type == "问题照片"]
         rect_photos = [p for p in issue.photos if p.photo_type == "整改照片"]
@@ -586,19 +582,17 @@ def export_rectification_report(
             ws.cell(row=current_row, column=col).border = thin_border
         current_row += 1
 
-        ws.cell(row=current_row, column=1, value="整改前照片：").font = header_font
-        ws.cell(row=current_row, column=2, value="整改后照片：").font = header_font
-        for col in range(1, 3):
-            ws.cell(row=current_row, column=col).border = thin_border
-        current_row += 1
-
         issue_photos = [p for p in issue.photos if p.photo_type == "问题照片"]
         rect_photos = [p for p in issue.photos if p.photo_type == "整改照片"]
         photo_height = 150
 
         for photo_idx in range(max(len(issue_photos), len(rect_photos), 1)):
-            ws.cell(row=current_row, column=1, value="")
-            ws.cell(row=current_row, column=2, value="")
+            c1 = ws.cell(row=current_row, column=1, value="整改前照片：")
+            c1.font = header_font
+            c1.alignment = top_left_alignment
+            c2 = ws.cell(row=current_row, column=2, value="整改后照片：")
+            c2.font = header_font
+            c2.alignment = top_left_alignment
             if photo_idx < len(issue_photos):
                 try:
                     if os.path.exists(issue_photos[photo_idx].file_path):

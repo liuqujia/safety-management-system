@@ -21,6 +21,7 @@ def get_issues(
     limit: int = 100,
     status: Optional[str] = None,
     severity: Optional[str] = None,
+    project_name: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     query = db.query(SafetyIssue)
@@ -29,9 +30,21 @@ def get_issues(
         query = query.filter(SafetyIssue.status == status)
     if severity:
         query = query.filter(SafetyIssue.severity == severity)
+    if project_name:
+        query = query.filter(SafetyIssue.project_name == project_name)
 
-    issues = query.order_by(SafetyIssue.create_time.desc()).offset(skip).limit(limit).all()
+    issues = query.order_by(SafetyIssue.id.asc()).offset(skip).limit(limit).all()
     return [issue.to_dict() for issue in issues]
+
+
+@router.get("/projects/list")
+def get_projects(db: Session = Depends(get_db)):
+    """获取所有不重复的项目名称"""
+    rows = db.query(SafetyIssue.project_name).filter(
+        SafetyIssue.project_name.isnot(None),
+        SafetyIssue.project_name != ""
+    ).distinct().all()
+    return [r[0] for r in rows]
 
 @router.get("/{issue_id}", response_model=IssueResponse)
 def get_issue(issue_id: int, db: Session = Depends(get_db)):
@@ -181,8 +194,64 @@ def extract_images_from_doc(doc, issue_id):
             images.append((file_name, image_data))
     return images
 
+@router.post("/preview-from-word")
+async def preview_from_word(file: UploadFile = File(...)):
+    """仅解析 Word，不写库；返回识别到的项目名称和隐患条目预览。"""
+    try:
+        from docx import Document
+
+        contents = await file.read()
+        doc = Document(io.BytesIO(contents))
+
+        project_name = ""
+        for paragraph in doc.paragraphs:
+            text = paragraph.text.strip()
+            if not text:
+                continue
+            if "企业名称" in text:
+                project_name = text.replace("企业名称：", "").replace("企业名称:", "").strip()
+                project_name = project_name.split("隐患条数")[0].strip()
+            if "项目名称" in text and not project_name:
+                project_name = text.replace("项目名称：", "").replace("项目名称:", "").strip()
+
+        items = []
+        for table in doc.tables:
+            for row_idx, row in enumerate(table.rows):
+                if row_idx == 0:
+                    continue
+                cells = row.cells
+                if len(cells) < 3:
+                    continue
+                title = cells[2].text.strip() if len(cells) >= 3 else ""
+                description = cells[3].text.strip() if len(cells) >= 4 else ""
+                notes = cells[4].text.strip() if len(cells) >= 5 else ""
+                remarks = cells[5].text.strip() if len(cells) >= 6 else ""
+                deadline = parse_deadline(remarks) if remarks else None
+                if not title:
+                    continue
+                items.append({
+                    "title": title[:200],
+                    "description": description[:500] if description else None,
+                    "notes": notes[:500] if notes else None,
+                    "deadline": deadline.isoformat() if deadline else None,
+                })
+
+        return {
+            "success": True,
+            "project_name": project_name,
+            "items": items,
+            "tables_found": len(doc.tables),
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
 @router.post("/import-from-word")
-async def import_from_word(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def import_from_word(
+    file: UploadFile = File(...),
+    project_name: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
     try:
         from docx import Document
         
@@ -191,7 +260,7 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
         
         imported_count = 0
         errors = []
-        project_name = ""
+        detected_project_name = ""
         
         debug_info = []
         
@@ -200,12 +269,15 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
             if text:
                 debug_info.append(f"段落: {text[:100]}")
             if "企业名称" in text:
-                project_name = text.replace("企业名称：", "").replace("企业名称:", "").strip()
-                project_name = project_name.split("隐患条数")[0].strip()
+                detected_project_name = text.replace("企业名称：", "").replace("企业名称:", "").strip()
+                detected_project_name = detected_project_name.split("隐患条数")[0].strip()
             if "项目名称" in text:
-                project_name = text.replace("项目名称：", "").replace("项目名称:", "").strip()
+                detected_project_name = text.replace("项目名称：", "").replace("项目名称:", "").strip()
         
-        debug_info.append(f"项目名称: {project_name}")
+        # 优先用前端传的 project_name（用户在预览框里可能改过），否则用文档里识别到的
+        final_project_name = (project_name or detected_project_name or "").strip()
+        
+        debug_info.append(f"项目名称: {final_project_name}")
         debug_info.append(f"表格数量: {len(doc.tables)}")
         
         all_images = extract_images_from_doc(doc, 0)
@@ -266,7 +338,7 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
                             'location': '',
                             'severity': '一般',
                             'deadline': deadline,
-                            'project_name': project_name,
+                            'project_name': final_project_name,
                             'responsible_person': '',
                             'status': '待整改',
                             'notes': notes[:500] if notes else None
@@ -313,7 +385,7 @@ async def import_from_word(file: UploadFile = File(...), db: Session = Depends(g
             'success': True,
             'imported_count': imported_count,
             'errors': errors,
-            'project_name': project_name,
+            'project_name': final_project_name,
             'tables_found': len(doc.tables),
             'paragraphs_count': len(doc.paragraphs),
             'images_found': len(all_images),

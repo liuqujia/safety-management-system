@@ -3,6 +3,11 @@
     <!-- 搜索和操作栏 -->
     <div class="filter-container">
       <el-form :inline="true" :model="queryParams" class="filter-form">
+        <el-form-item label="项目名称">
+          <el-select v-model="queryParams.project_name" placeholder="全部项目" clearable filterable @change="handleQuery" style="width: 180px">
+            <el-option v-for="p in projectOptions" :key="p" :label="p" :value="p" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="queryParams.status" placeholder="请选择状态" clearable @change="handleQuery">
             <el-option label="全部" value="" />
@@ -26,17 +31,22 @@
       </el-form>
       <div class="action-buttons">
         <el-button type="primary" icon="Plus" @click="handleAdd">新增问题</el-button>
-        <el-button type="info" icon="Upload" @click="importDialogVisible = true">导入Word</el-button>
-        <el-button type="success" icon="Download" @click="handleExport">导出Excel</el-button>
-        <el-button type="warning" icon="Document" @click="handleExportReply">导出整改回复</el-button>
+        <el-button type="info" icon="Upload" @click="openImportDialog">导入问题清单</el-button>
+        <el-button type="warning" icon="Document" @click="openExportReplyDialog">导出整改回复</el-button>
         <el-button type="primary" icon="Setting" @click="templateDialogVisible = true" plain>模板管理</el-button>
       </div>
     </div>
 
     <!-- 问题列表 -->
     <el-table :data="issueList" border stripe v-loading="loading">
-      <el-table-column type="index" label="序号" width="60" align="center" />
-      <el-table-column prop="title" label="问题标题" min-width="200" show-overflow-tooltip />
+      <el-table-column prop="id" label="序号" width="70" align="center" />
+      <el-table-column prop="project_name" label="项目名称" width="180" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.project_name">{{ row.project_name }}</span>
+          <span v-else style="color: #c0c4cc">未提供</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="title" label="问题标题" min-width="220" show-overflow-tooltip />
       <el-table-column prop="location" label="发现位置" width="150" show-overflow-tooltip />
       <el-table-column prop="severity" label="严重程度" width="100" align="center">
         <template #default="{ row }">
@@ -110,6 +120,7 @@
     <el-dialog v-model="detailVisible" title="问题详情" width="800px">
       <el-descriptions :column="2" border>
         <el-descriptions-item label="问题标题">{{ currentIssue.title }}</el-descriptions-item>
+        <el-descriptions-item label="项目名称">{{ currentIssue.project_name || '未提供' }}</el-descriptions-item>
         <el-descriptions-item label="严重程度">
           <el-tag :type="getSeverityType(currentIssue.severity)">{{ currentIssue.severity }}</el-tag>
         </el-descriptions-item>
@@ -171,45 +182,24 @@
       </template>
     </el-dialog>
 
-    <!-- 导出Excel对话框 -->
-    <el-dialog v-model="exportDialogVisible" title="导出Excel" width="400px">
-      <el-form label-width="90px">
-        <el-form-item label="选择模板">
-          <el-select v-model="selectedTemplateId" placeholder="请选择导出模板" style="width: 100%">
-            <el-option
-              v-for="t in templateList"
-              :key="t.id"
-              :label="t.name + (t.is_default ? ' (默认)' : '')"
-              :value="t.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="状态筛选">
-          <el-select v-model="exportParams.status" placeholder="不筛选" clearable style="width: 100%">
-            <el-option label="待整改" value="待整改" />
-            <el-option label="整改中" value="整改中" />
-            <el-option label="已完成" value="已完成" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="严重程度">
-          <el-select v-model="exportParams.severity" placeholder="不筛选" clearable style="width: 100%">
-            <el-option label="轻微" value="轻微" />
-            <el-option label="一般" value="一般" />
-            <el-option label="严重" value="严重" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="exportDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="doExport">导出</el-button>
-      </template>
-    </el-dialog>
-
     <!-- 导出整改回复对话框 -->
-    <el-dialog v-model="replyDialogVisible" title="导出整改回复报告" width="500px">
+    <el-dialog v-model="replyDialogVisible" title="导出整改回复报告" width="520px">
       <el-form label-width="100px">
         <el-form-item label="项目名称" required>
-          <el-input v-model="replyForm.project_name" placeholder="请输入项目名称" />
+          <el-input v-model="replyForm.project_name" placeholder="如未自动填充，请手动输入">
+            <template #append>
+              <el-dropdown @command="(p) => replyForm.project_name = p">
+                <el-button>
+                  从已有项目选 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item v-for="p in projectOptions" :key="p" :command="p">{{ p }}</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </template>
+          </el-input>
         </el-form-item>
         <el-form-item label="项目负责人" required>
           <el-input v-model="replyForm.project_responsible" placeholder="请输入项目负责人" />
@@ -218,14 +208,14 @@
           <el-date-picker
             v-model="replyForm.reply_date"
             type="date"
-            placeholder="选择日期"
+            placeholder="选择日期（默认今天）"
             format="YYYY年MM月DD日"
             value-format="YYYY年MM月DD日"
             style="width: 100%"
           />
         </el-form-item>
         <el-form-item label="选择隐患">
-          <el-select v-model="replyForm.issue_ids" multiple placeholder="全部（不选则包含所有）" style="width: 100%">
+          <el-select v-model="replyForm.issue_ids" multiple placeholder="默认导出已勾选问题；不选则包含当前筛选下所有问题" style="width: 100%">
             <el-option
               v-for="issue in issueList"
               :key="issue.id"
@@ -285,11 +275,11 @@
       </el-dialog>
     </el-dialog>
 
-    <!-- 导入Word对话框 -->
-    <el-dialog v-model="importDialogVisible" title="导入Word文档" width="500px">
+    <!-- 导入问题清单对话框（先预览再确认导入） -->
+    <el-dialog v-model="importDialogVisible" title="导入问题清单" width="640px" @close="resetImportDialog">
       <el-alert
-        title="支持格式"
-        description="请上传 .docx 格式的隐患检查表文档。系统会自动解析表格中的隐患数据并导入。"
+        title="使用说明"
+        description="上传隐患检查表 .docx 文件，系统会从文档标题区识别出【企业名称/项目名称】，从表格中识别出隐患条目。如识别有误可手动修改后导入。"
         type="info"
         :closable="false"
         style="margin-bottom: 16px"
@@ -300,6 +290,7 @@
         :limit="1"
         accept=".docx"
         :on-change="handleWordFileChange"
+        :on-remove="handleWordFileRemove"
         drag
       >
         <el-icon class="el-icon--upload"><upload-filled /></el-icon>
@@ -308,9 +299,31 @@
           <div class="el-upload__tip">只支持 .docx 文件</div>
         </template>
       </el-upload>
+
+      <el-divider v-if="importPreview" />
+
+      <div v-if="importPreview" class="import-preview">
+        <el-form label-width="100px" v-loading="previewLoading">
+          <el-form-item label="识别隐患数">
+            <el-tag type="success" size="large">{{ importPreview.items?.length || 0 }} 条</el-tag>
+            <span v-if="importPreview.project_name" style="margin-left: 12px; color: #909399">项目：{{ importPreview.project_name }}</span>
+          </el-form-item>
+          <el-form-item label="隐患预览" v-if="importPreview.items?.length">
+            <div class="preview-items">
+              <div v-for="(it, i) in importPreview.items" :key="i" class="preview-item">
+                <div class="preview-title">隐患{{ i + 1 }}：{{ it.title }}</div>
+                <div v-if="it.description" class="preview-desc">描述：{{ it.description }}</div>
+                <div v-if="it.notes" class="preview-desc">措施：{{ it.notes }}</div>
+                <div v-if="it.deadline" class="preview-desc">期限：{{ it.deadline }}</div>
+              </div>
+            </div>
+          </el-form-item>
+        </el-form>
+      </div>
+
       <template #footer>
         <el-button @click="importDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="importing" @click="doImportWord">开始导入</el-button>
+        <el-button type="primary" :loading="importing" :disabled="!selectedWordFile || !importPreview?.items?.length" @click="doImportWord">确认导入</el-button>
       </template>
     </el-dialog>
   </div>
@@ -319,30 +332,31 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, UploadFilled } from '@element-plus/icons-vue'
+import { Plus, UploadFilled, ArrowDown } from '@element-plus/icons-vue'
 import {
   getIssues, getIssue, createIssue, updateIssue, deleteIssue,
-  uploadPhoto, exportExcel, downloadPhoto,
+  uploadPhoto, downloadPhoto,
   getTemplates, createTemplate, updateTemplate, deleteTemplate,
-  exportRectificationReply, importFromWord
+  exportRectificationReply, importFromWord, previewFromWord, getProjects
 } from '@/api/safety'
 
 const loading = ref(false)
 const issueList = ref([])
 const total = ref(0)
 const templateList = ref([])
+const projectOptions = ref([])
 const queryParams = reactive({
   page: 1,
   limit: 100,
   status: '',
-  severity: ''
+  severity: '',
+  project_name: ''
 })
 
 // 对话框状态
 const dialogVisible = ref(false)
 const detailVisible = ref(false)
 const uploadVisible = ref(false)
-const exportDialogVisible = ref(false)
 const replyDialogVisible = ref(false)
 const templateDialogVisible = ref(false)
 const templateEditVisible = ref(false)
@@ -355,12 +369,14 @@ const wordUploadRef = ref(null)
 const currentIssue = ref({})
 const uploadIssueId = ref(null)
 const importing = ref(false)
+const previewLoading = ref(false)
 const selectedTemplateId = ref(1)
 const photoType = '整改照片'
 const templateEditTitle = ref('新建模板')
 
-// 导出参数
-const exportParams = reactive({ status: '', severity: '' })
+// 导入预览
+const selectedWordFile = ref(null)
+const importPreview = ref(null)
 
 // 整改回复表单
 const replyForm = reactive({
@@ -393,13 +409,20 @@ const rules = {
   title: [{ required: true, message: '请输入问题标题', trigger: 'blur' }]
 }
 
-// 已选Word文件
-const selectedWordFile = ref(null)
-
 onMounted(() => {
   getList()
   loadTemplates()
+  loadProjects()
 })
+
+const loadProjects = async () => {
+  try {
+    const res = await getProjects()
+    projectOptions.value = res || []
+  } catch (error) {
+    console.warn('获取项目列表失败', error)
+  }
+}
 
 const getList = async () => {
   loading.value = true
@@ -434,6 +457,7 @@ const handleQuery = () => {
 const resetQuery = () => {
   queryParams.status = ''
   queryParams.severity = ''
+  queryParams.project_name = ''
   handleQuery()
 }
 
@@ -534,38 +558,16 @@ const submitForm = async () => {
 
 const handleDialogClose = () => formRef.value?.resetFields()
 
-// ── 导出Excel ──────────────────────────────────────────────────────────────
-
-const handleExport = () => {
-  exportParams.status = ''
-  exportParams.severity = ''
-  exportDialogVisible.value = true
-}
-
-const doExport = async () => {
-  try {
-    ElMessage.info('正在导出，请稍候...')
-    const params = { ...exportParams }
-    if (selectedTemplateId.value) params.template_id = selectedTemplateId.value
-    const res = await exportExcel(params)
-    const blob = new Blob([res], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `安全问题_${Date.now()}.xlsx`
-    link.click()
-    window.URL.revokeObjectURL(url)
-    exportDialogVisible.value = false
-    ElMessage.success('导出成功')
-  } catch (error) {
-    ElMessage.error('导出失败')
-  }
-}
-
 // ── 导出整改回复 ────────────────────────────────────────────────────────────
 
-const handleExportReply = () => {
-  replyForm.project_name = ''
+const openExportReplyDialog = () => {
+  // 预填项目名称：当前筛选下若只有一种项目名则自动填入
+  const projects = [...new Set(issueList.value.map(i => i.project_name).filter(Boolean))]
+  if (projects.length === 1) {
+    replyForm.project_name = projects[0]
+  } else {
+    replyForm.project_name = ''
+  }
   replyForm.project_responsible = ''
   replyForm.reply_date = ''
   replyForm.issue_ids = []
@@ -659,9 +661,42 @@ const deleteTemplate = async (id) => {
 
 // ── 导入Word ────────────────────────────────────────────────────────────────
 
-const handleWordFileChange = (uploadFile) => {
-  selectedWordFile.value = uploadFile.raw
+const openImportDialog = async () => {
+  importDialogVisible.value = true
+  await loadProjects()
 }
+
+const handleWordFileChange = async (uploadFile) => {
+  selectedWordFile.value = uploadFile.raw
+  importPreview.value = null
+  previewLoading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', uploadFile.raw)
+    const res = await previewFromWord(fd)
+    if (res && res.success) {
+      importPreview.value = res
+    } else {
+      ElMessage.warning('预览失败：' + (res?.message || '未知错误'))
+    }
+  } catch (error) {
+    ElMessage.warning('预览失败：' + (error.message || '未知错误'))
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+const handleWordFileRemove = () => {
+  selectedWordFile.value = null
+  importPreview.value = null
+}
+
+const resetImportDialog = () => {
+  selectedWordFile.value = null
+  importPreview.value = null
+  if (wordUploadRef.value) wordUploadRef.value.clearFiles()
+}
+
 
 const doImportWord = async () => {
   if (!selectedWordFile.value) {
@@ -674,12 +709,12 @@ const doImportWord = async () => {
     fd.append('file', selectedWordFile.value)
     const result = await importFromWord(fd)
     if (result && result.success) {
-      const msg = `成功导入 ${result.imported_count} 条记录\n项目：${result.project_name || '未知'}`
+      const msg = `成功导入 ${result.imported_count} 条隐患记录\n项目：${result.project_name || '未知'}`
       ElMessage.success({ message: msg, duration: 5000 })
       importDialogVisible.value = false
-      selectedWordFile.value = null
-      if (wordUploadRef.value) wordUploadRef.value.clearFiles()
+      resetImportDialog()
       getList()
+      loadProjects()
     } else {
       ElMessage.error(result?.message || '导入失败')
     }
@@ -722,5 +757,34 @@ const getPhotoUrl = (photoId) => {
 .photo-list {
   display: flex;
   flex-wrap: wrap;
+}
+/* 导入预览 */
+.import-preview {
+  margin-top: 12px;
+}
+.preview-items {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  padding: 8px;
+}
+.preview-item {
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+.preview-item:last-child {
+  border-bottom: none;
+}
+.preview-title {
+  font-weight: 600;
+  color: #303133;
+  font-size: 13px;
+}
+.preview-desc {
+  color: #909399;
+  font-size: 12px;
+  margin-top: 2px;
+  line-height: 1.4;
 }
 </style>
