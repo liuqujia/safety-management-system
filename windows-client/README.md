@@ -72,3 +72,6 @@ cd dist
 
 ### 整改回复格式（用户要求）
 包含字段：项目名称、项目负责人、隐患事项、整改措施、整改前照片、整改后照片、回复日期
+---
+> 构建版本由 GitHub Actions 自动构建，触发条件：`push` 到 `main` 分支且 `windows-client/` 目录有改动。
+> 下载：进入 GitHub → Actions → Build Windows EXE → latest run → Artifacts
