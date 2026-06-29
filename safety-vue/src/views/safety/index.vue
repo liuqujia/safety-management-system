@@ -40,7 +40,7 @@
     <!-- 项目分组问题列表 -->
     <div class="project-groups" v-loading="loading">
       <!-- 没有结果 -->
-      <el-empty v-if="!loading && filteredProjects.length === 0" description="暂无数据" />
+      <div v-if="!loading && filteredProjects.length === 0" class="empty-data">暂无数据</div>
       
       <!-- 全部项目折叠/展开按钮 -->
       <div v-if="filteredProjects.length > 1" class="expand-all-bar">
@@ -64,19 +64,19 @@
           <span class="expand-icon">{{ expandedProjects[group.project_name] ? '▲' : '▼' }}</span>
         </div>
         
-        <el-collapse-transition>
+        <transition name="el-zoom-in-top">
           <div v-show="expandedProjects[group.project_name]" class="project-body">
             <el-table :data="group.issues" border stripe size="small" :show-header="group.issues.length > 0">
-              <el-table-column prop="id" label="序号" width="60" align="center" />
+              <el-table-column type="index" label="序号" width="60" align="center" />
               <el-table-column prop="title" label="问题内容" min-width="220" show-overflow-tooltip />
               <el-table-column prop="location" label="发现位置" width="140" show-overflow-tooltip />
               <el-table-column prop="severity" label="严重程度" width="90" align="center">
-                <template #default="{ row }">
+                <template slot-scope="{row}">
                   <el-tag :type="getSeverityType(row.severity)">{{ row.severity }}</el-tag>
                 </template>
               </el-table-column>
               <el-table-column prop="status" label="状态" width="90" align="center">
-                <template #default="{ row }">
+                <template slot-scope="{row}">
                   <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
                 </template>
               </el-table-column>
@@ -84,16 +84,16 @@
               <el-table-column prop="create_time" label="创建日期" width="100" />
               <el-table-column prop="photo_count" label="照片" width="60" align="center" />
               <el-table-column label="操作" width="200" fixed="right" align="center">
-                <template #default="{ row }">
-                  <el-button link type="primary" @click="handleView(row)">查看</el-button>
-                  <el-button link type="primary" @click="handleEdit(row)">编辑</el-button>
-                  <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+                <template slot-scope="{row}">
+                  <el-button type="text" size="small" @click="handleView(row)">查看</el-button>
+                  <el-button type="text" size="small" @click="handleEdit(row)">编辑</el-button>
+                  <el-button type="text" size="small" style="color:#F56C6C" @click="handleDelete(row)">删除</el-button>
                 </template>
               </el-table-column>
             </el-table>
-            <el-empty v-if="group.issues.length === 0" description="暂无隐患" />
+            <div v-if="group.issues.length === 0" style="line-height:60px;text-align:center;color:#999">暂无隐患</div>
           </div>
-        </el-collapse-transition>
+        </transition>
       </div>
     </div>
 
