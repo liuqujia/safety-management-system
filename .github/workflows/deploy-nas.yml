@@ -1,0 +1,36 @@
+name: 🚀 推送代码到 NAS 并自动部署
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'safety-vue/src/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to NAS via SSH
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.NAS_HOST }}
+          username: ${{ secrets.NAS_USER }}
+          password: ${{ secrets.NAS_PASSWORD }}
+          port: 22
+          script: |
+            set -e
+            cd ${{ vars.NAS_APP_DIR }}
+            git fetch origin main
+            git reset --hard origin/main
+            echo "✅ 代码已更新"
+            echo "🔄 重建 Docker..."
+            cd backend
+            docker compose down
+            docker compose up -d --build
+            echo "✅ 部署完成"
