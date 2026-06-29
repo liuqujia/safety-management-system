@@ -711,55 +711,66 @@ class MainWindow(QMainWindow):
                     QMessageBox.warning(self, "错误", f"上传失败: {str(e)}")
 
     def import_word_dialog(self):
-        file_path = QFileDialog.getOpenFileName(
-            self, "选择问题清单Word文件", "",
-            "Word文件 (*.docx *.doc)"
-        )
-        if not file_path[0]:
-            return
-
-        # 第一步：预览
         try:
-            preview = self.api_client.preview_from_word(file_path[0])
+            file_path = QFileDialog.getOpenFileName(
+                self, "选择问题清单Word文件", "",
+                "Word文件 (*.docx *.doc)"
+            )
+            if not file_path[0]:
+                return
+
+            # 第一步：预览
+            try:
+                preview = self.api_client.preview_from_word(file_path[0])
+            except AttributeError as e:
+                QMessageBox.warning(self, "版本过旧",
+                    f"当前exe版本不支持此功能，请重新下载最新exe。\n错误: {str(e)}")
+                return
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"连接服务器失败: {str(e)}")
+                return
+
+            if not preview or not preview.get('success'):
+                QMessageBox.warning(self, "预览失败", preview.get('message', '无法读取Word文件内容'))
+                return
+
+            items = preview.get('items', [])
+            if not items:
+                QMessageBox.warning(self, "未识别到隐患", "从Word文件中未识别到任何隐患记录")
+                return
+
+            # 弹出预览对话框
+            try:
+                dialog = ImportPreviewDialog(preview, self)
+                if dialog.exec_() != QDialog.Accepted:
+                    return
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"预览窗口异常: {str(e)}")
+                return
+
+            skip_indices = dialog.get_skip_indices()
+            checked_count = dialog.get_checked_count()
+
+            if checked_count == 0:
+                QMessageBox.information(self, "取消", "未选择任何隐患，导入已取消")
+                return
+
+            # 第二步：导入（跳过未勾选的）
+            try:
+                result = self.api_client.import_from_word(file_path[0], skip_indices=skip_indices)
+                if result and result.get('success'):
+                    msg = f"成功导入 {result['imported_count']} 条隐患记录\n项目：{result.get('project_name', '')}"
+                    QMessageBox.information(self, "导入成功", msg)
+                    self.refresh_issues()
+                elif result:
+                    QMessageBox.warning(self, "导入部分成功",
+                        f"成功 {result.get('imported_count', 0)} 条，错误：{result.get('message', '')}")
+                else:
+                    QMessageBox.warning(self, "导入失败", "API返回为空")
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"导入失败: {str(e)}")
         except Exception as e:
-            QMessageBox.warning(self, "错误", f"连接服务器失败: {str(e)}")
-            return
-
-        if not preview or not preview.get('success'):
-            QMessageBox.warning(self, "预览失败", preview.get('message', '无法读取Word文件内容'))
-            return
-
-        items = preview.get('items', [])
-        if not items:
-            QMessageBox.warning(self, "未识别到隐患", "从Word文件中未识别到任何隐患记录")
-            return
-
-        # 弹出预览对话框
-        dialog = ImportPreviewDialog(preview, self)
-        if dialog.exec_() != QDialog.Accepted:
-            return
-
-        skip_indices = dialog.get_skip_indices()
-        checked_count = dialog.get_checked_count()
-
-        if checked_count == 0:
-            QMessageBox.information(self, "取消", "未选择任何隐患，导入已取消")
-            return
-
-        # 第二步：导入（跳过未勾选的）
-        try:
-            result = self.api_client.import_from_word(file_path[0], skip_indices=skip_indices)
-            if result and result.get('success'):
-                msg = f"成功导入 {result['imported_count']} 条隐患记录\n项目：{result.get('project_name', '')}"
-                QMessageBox.information(self, "导入成功", msg)
-                self.refresh_issues()
-            elif result:
-                QMessageBox.warning(self, "导入部分成功",
-                    f"成功 {result.get('imported_count', 0)} 条，错误：{result.get('message', '')}")
-            else:
-                QMessageBox.warning(self, "导入失败", "API返回为空")
-        except Exception as e:
-            QMessageBox.warning(self, "错误", f"导入失败: {str(e)}")
+            QMessageBox.warning(self, "未知错误", f"发生异常: {str(e)}")
 
 
     def do_export(self, dialog):
