@@ -203,22 +203,20 @@ async def preview_from_word(file: UploadFile = File(...)):
         contents = await file.read()
         doc = Document(io.BytesIO(contents))
 
-        # 项目名称 = 企业名称：优先取段落[0]（通常就是企业全称）
+        # 项目名称 = 企业名称栏的值（如"SP 7.8KM CLUB"），用正则截取到隐患条数/检查时间之前
         project_name = ""
-        first_para = doc.paragraphs[0].text.strip() if doc.paragraphs else ""
-        # 如果段落[0]像是正式名称（非空且非标题类文字），用它
-        if first_para and not any(k in first_para for k in ["隐患", "检查", "委托", "整改", "报告", "表"]):
-            project_name = first_para
-        # 其次从段落中找"企业名称："或"项目名称："
         for paragraph in doc.paragraphs:
             text = paragraph.text.strip()
             if not text:
                 continue
-            if "企业名称" in text and not project_name:
-                project_name = text.replace("企业名称：", "").replace("企业名称:", "").strip()
-                project_name = project_name.split("隐患条数")[0].split("检查时间")[0].strip()
+            if "企业名称" in text:
+                val = re.search(r'企业名称[：:]\s*(.*?)(?=\s{2,}隐患条数|\s{2,}检查时间|\s{2,}检查人|\s{2,}隐患条数|$)', text, re.DOTALL)
+                if val:
+                    project_name = val.group(1).strip()
             if "项目名称" in text and not project_name:
-                project_name = text.replace("项目名称：", "").replace("项目名称:", "").strip()
+                val = re.search(r'项目名称[：:]\s*(.*?)(?=\s{2,}隐患条数|\s{2,}检查时间|\s{2,}检查人|$)', text, re.DOTALL)
+                if val:
+                    project_name = val.group(1).strip()
 
         items = []
         for table in doc.tables:
@@ -271,20 +269,19 @@ async def import_from_word(
         
         debug_info = []
         
-        # 优先取段落[0]作为企业名称（通常是企业全称）
-        first_para = doc.paragraphs[0].text.strip() if doc.paragraphs else ""
-        if first_para and not any(k in first_para for k in ["隐患", "检查", "委托", "整改", "报告", "表"]):
-            detected_project_name = first_para
-        
+        # 项目名称 = 企业名称栏的值，用正则截取到隐患条数/检查时间之前
         for paragraph in doc.paragraphs:
             text = paragraph.text.strip()
             if text:
                 debug_info.append(f"段落: {text[:100]}")
             if "企业名称" in text and not detected_project_name:
-                detected_project_name = text.replace("企业名称：", "").replace("企业名称:", "").strip()
-                detected_project_name = detected_project_name.split("隐患条数")[0].split("检查时间")[0].strip()
+                val = re.search(r'企业名称[：:]\s*(.*?)(?=\s{2,}隐患条数|\s{2,}检查时间|\s{2,}检查人|\s{2,}隐患条数|$)', text, re.DOTALL)
+                if val:
+                    detected_project_name = val.group(1).strip()
             if "项目名称" in text and not detected_project_name:
-                detected_project_name = text.replace("项目名称：", "").replace("项目名称:", "").strip()
+                val = re.search(r'项目名称[：:]\s*(.*?)(?=\s{2,}隐患条数|\s{2,}检查时间|\s{2,}检查人|$)', text, re.DOTALL)
+                if val:
+                    detected_project_name = val.group(1).strip()
         
         # 优先用前端传的 project_name（用户在预览框里可能改过），否则用文档里识别到的
         final_project_name = (project_name or detected_project_name or "").strip()
