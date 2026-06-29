@@ -890,7 +890,7 @@ class ExportReplyDialog(QDialog):
 
     def init_ui(self):
         self.setWindowTitle("导出整改回复")
-        self.setGeometry(300, 300, 500, 350)
+        self.setGeometry(300, 300, 500, 400)
 
         layout = QVBoxLayout()
         self.setLayout(layout)
@@ -910,6 +910,11 @@ class ExportReplyDialog(QDialog):
         self.reply_date_input.setDate(QDate.currentDate())
         form.addRow("回复日期:", self.reply_date_input)
 
+        self.issues_list = QListWidget()
+        self.issues_list.setSelectionMode(QListWidget.MultiSelection)
+        self.load_issues()
+        form.addRow("选择问题:", self.issues_list)
+
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()
@@ -924,10 +929,36 @@ class ExportReplyDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
+    def load_issues(self):
+        try:
+            issues = self.parent_window.api_client.get_issues()
+            for issue in issues:
+                item = QListWidgetItem(f"#{issue['id']} - {issue['title']} [{issue['status']}]")
+                item.setData(Qt.UserRole, issue['id'])
+                self.issues_list.addItem(item)
+        except Exception as e:
+            QMessageBox.warning(self, "警告", f"加载问题列表失败: {str(e)}")
+
     def export_reply(self):
         if not self.project_name_input.text():
             QMessageBox.warning(self, "警告", "请填写项目名称")
             return
+
+        selected_ids = []
+        for i in range(self.issues_list.count()):
+            item = self.issues_list.item(i)
+            if item.isSelected():
+                selected_ids.append(item.data(Qt.UserRole))
+
+        if not selected_ids:
+            reply = QMessageBox.question(
+                self, '确认',
+                '未选择任何问题，将导出所有问题。是否继续？',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
 
         file_path = QFileDialog.getSaveFileName(
             self, "保存整改回复文件", "",
@@ -936,10 +967,14 @@ class ExportReplyDialog(QDialog):
 
         if file_path[0]:
             try:
+                date = self.reply_date_input.date()
+                date_str = f"{date.year()}年{date.month()}月{date.day()}日"
+                
                 content = self.parent_window.api_client.export_rectification_reply(
                     self.project_name_input.text(),
                     self.project_responsible_input.text(),
-                    self.reply_date_input.date().toString("yyyy-MM-dd")
+                    date_str,
+                    selected_ids if selected_ids else None
                 )
                 if content:
                     with open(file_path[0], 'wb') as f:
@@ -953,6 +988,8 @@ class TemplateManagementDialog(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
         self.parent_window = parent
+        self.server_url = parent.server_url if hasattr(parent, 'server_url') else parent.base_url
+        self.api_client = parent.api_client if hasattr(parent, 'api_client') else None
         self.init_ui()
         self.load_templates()
 
@@ -994,7 +1031,7 @@ class TemplateManagementDialog(QDialog):
 
     def load_templates(self):
         try:
-            templates = self.parent_window.api_client.get_templates()
+            templates = self.api_client.get_templates()
             self.template_table.setRowCount(len(templates))
             for row, template in enumerate(templates):
                 self.template_table.setItem(row, 0, QTableWidgetItem(str(template['id'])))
@@ -1040,7 +1077,7 @@ class TemplateManagementDialog(QDialog):
     def delete_template_by_id(self, template_id):
         try:
             response = requests.delete(
-                f"{self.parent_window.server_url}/api/export/templates/{template_id}",
+                f"{self.server_url}/api/export/templates/{template_id}",
                 timeout=30
             )
             if response.status_code == 200:
@@ -1056,6 +1093,7 @@ class TemplateEditDialog(QDialog):
         super().__init__(parent)
         self.parent_window = parent
         self.template_id = template_id
+        self.server_url = parent.server_url if hasattr(parent, 'server_url') else parent.parent_window.server_url
         self.init_ui(template_name)
 
     def init_ui(self, template_name):
@@ -1103,13 +1141,13 @@ class TemplateEditDialog(QDialog):
         try:
             if self.template_id:
                 response = requests.put(
-                    f"{self.parent_window.server_url}/api/export/templates/{self.template_id}",
+                    f"{self.server_url}/api/export/templates/{self.template_id}",
                     json=data,
                     timeout=30
                 )
             else:
                 response = requests.post(
-                    f"{self.parent_window.server_url}/api/export/templates",
+                    f"{self.server_url}/api/export/templates",
                     json=data,
                     timeout=30
                 )
