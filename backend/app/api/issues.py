@@ -250,6 +250,7 @@ async def preview_from_word(file: UploadFile = File(...)):
 async def import_from_word(
     file: UploadFile = File(...),
     project_name: Optional[str] = Form(None),
+    skip_indices: Optional[str] = Form(None),  # 逗号分隔的行索引，跳过这些行不导入
     db: Session = Depends(get_db)
 ):
     try:
@@ -285,6 +286,15 @@ async def import_from_word(
         
         image_idx = 0
         
+        # 解析要跳过的行索引
+        skip_set = set()
+        if skip_indices:
+            for idx_str in skip_indices.split(','):
+                try:
+                    skip_set.add(int(idx_str.strip()))
+                except ValueError:
+                    pass
+
         for table_idx, table in enumerate(doc.tables):
             debug_info.append(f"表格{table_idx}: {len(table.rows)}行 x {len(table.columns)}列")
             for row_idx, row in enumerate(table.rows):
@@ -296,6 +306,12 @@ async def import_from_word(
                 debug_info.append(f"  行{row_idx}: {', '.join(row_texts)}")
                 
                 if row_idx == 0:
+                    continue
+
+                # 计算全局行索引
+                global_row_idx = (table_idx * 1000) + row_idx
+                if skip_set and global_row_idx in skip_set:
+                    debug_info.append(f"  跳过（用户在预览中已删除）")
                     continue
                 
                 try:
