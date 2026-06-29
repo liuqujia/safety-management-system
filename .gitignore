@@ -40,3 +40,10 @@ build/
 # PyInstaller
 *.spec.bak
 *.manifest
+
+# 私有模板文件（仅本地参考，不上传）
+*.xlsx
+*.docx
+!windows-client/**
+!macos-client/**
+!mobile-app/**
