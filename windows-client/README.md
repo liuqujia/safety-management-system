@@ -75,3 +75,4 @@ cd dist
 ---
 > 构建版本由 GitHub Actions 自动构建，触发条件：`push` 到 `main` 分支且 `windows-client/` 目录有改动。
 > 下载：进入 GitHub → Actions → Build Windows EXE → latest run → Artifacts
+# 2026-06-29 14:39 自动构建触发
