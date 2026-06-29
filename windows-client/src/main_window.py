@@ -378,15 +378,6 @@ class MainWindow(QMainWindow):
         function_bar.addWidget(import_word_btn)
 
         export_btn = QPushButton("导出Excel")
-        export_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 8px 16px; border-radius: 4px;")
-        export_btn.clicked.connect(self.export_excel_dialog)
-        function_bar.addWidget(export_btn)
-
-        export_with_photos_btn = QPushButton("导出Excel（带照片）")
-        export_with_photos_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 8px 16px; border-radius: 4px;")
-        export_with_photos_btn.clicked.connect(self.export_excel_with_photos_dialog)
-        function_bar.addWidget(export_with_photos_btn)
-
         export_reply_btn = QPushButton("导出整改回复")
         export_reply_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px 16px; border-radius: 4px;")
         export_reply_btn.clicked.connect(self.export_rectification_reply_dialog)
@@ -754,43 +745,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "错误", f"导入失败: {str(e)}")
 
-    def export_excel_dialog(self):
-        try:
-            templates = self.api_client.get_templates()
-        except Exception as e:
-            templates = []
-            QMessageBox.warning(self, "警告", f"获取模板列表失败: {str(e)}")
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle("导出Excel")
-        dialog.setGeometry(300, 300, 450, 250)
-
-        layout = QVBoxLayout()
-
-        form = QFormLayout()
-
-        self.template_combo = QComboBox()
-        self.template_combo.addItem("默认模板", 0)
-        for template in templates:
-            self.template_combo.addItem(template['name'], template['id'])
-        form.addRow("选择模板:", self.template_combo)
-
-        layout.addLayout(form)
-
-        btn_layout = QHBoxLayout()
-        export_btn = QPushButton("导出")
-        export_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 8px 16px; border-radius: 4px;")
-        export_btn.clicked.connect(lambda: self.do_export(dialog))
-        btn_layout.addWidget(export_btn)
-
-        cancel_btn = QPushButton("取消")
-        cancel_btn.clicked.connect(dialog.reject)
-        btn_layout.addWidget(cancel_btn)
-
-        layout.addLayout(btn_layout)
-        dialog.setLayout(layout)
-
-        dialog.exec_()
 
     def do_export(self, dialog):
         file_path = QFileDialog.getSaveFileName(
@@ -820,24 +774,6 @@ class MainWindow(QMainWindow):
         dialog = TemplateManagementDialog(self)
         dialog.exec_()
 
-    def export_excel_with_photos_dialog(self):
-        file_path = QFileDialog.getSaveFileName(
-            self, "保存Excel文件（带照片）", "",
-            "Excel (*.xlsx)"
-        )
-        if file_path[0]:
-            try:
-                status = self.status_filter.currentText()
-                severity = self.severity_filter.currentText()
-                status_param = None if status == "全部" else status
-                severity_param = None if severity == "全部" else severity
-                content = self.api_client.export_excel_with_photos(status_param, severity_param)
-                if content:
-                    with open(file_path[0], 'wb') as f:
-                        f.write(content)
-                    QMessageBox.information(self, "成功", "Excel文件已导出")
-            except Exception as e:
-                QMessageBox.warning(self, "错误", f"导出失败: {str(e)}")
 
     def export_rectification_reply_dialog(self):
         dialog = ExportReplyDialog(self)
