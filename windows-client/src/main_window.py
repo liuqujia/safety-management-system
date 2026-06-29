@@ -135,7 +135,12 @@ class APIClient:
                 files=files,
                 timeout=60
             )
-        return response.json() if response.status_code == 200 else None
+        if response.status_code != 200:
+            return {"success": False, "message": f"服务器返回错误码 {response.status_code}"}
+        try:
+            return response.json()
+        except Exception:
+            return {"success": False, "message": "服务器响应格式错误，不是合法JSON"}
 
     def import_from_word(self, file_path, skip_indices=None):
         with open(file_path, 'rb') as f:
@@ -731,10 +736,11 @@ class MainWindow(QMainWindow):
                 return
 
             if not preview or not preview.get('success'):
-                QMessageBox.warning(self, "预览失败", preview.get('message', '无法读取Word文件内容'))
+                msg = preview.get('message', '无法读取Word文件内容') if preview else '无法读取Word文件内容'
+                QMessageBox.warning(self, "预览失败", msg)
                 return
 
-            items = preview.get('items', [])
+            items = preview.get('items') or []
             if not items:
                 QMessageBox.warning(self, "未识别到隐患", "从Word文件中未识别到任何隐患记录")
                 return
@@ -764,7 +770,7 @@ class MainWindow(QMainWindow):
                     self.refresh_issues()
                 elif result:
                     QMessageBox.warning(self, "导入部分成功",
-                        f"成功 {result.get('imported_count', 0)} 条，错误：{result.get('message', '')}")
+                        f"成功 {result.get('imported_count', 0) if result else 0} 条，错误：{result.get('message', '') if result else ''}")
                 else:
                     QMessageBox.warning(self, "导入失败", "API返回为空")
             except Exception as e:
