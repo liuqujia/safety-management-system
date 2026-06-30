@@ -1,0 +1,35 @@
+# Runtime data
+backend/data/
+backend/templates/
+*.db
+*.sqlite
+*.sqlite3
+
+# Private documents and generated exports
+*.docx
+*.xlsx
+*.xls
+*.pdf
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+__pycache__/
+*.py[cod]
+*.so
+
+# Environment and local tooling
+.env
+.env.*
+!.env.example
+.DS_Store
+.vscode/
+.idea/
+
+# Archives and packaged apps
+*.zip
+*.tar.gz
+*.exe
+*.app/
+*.spec

@@ -1,0 +1,12 @@
+services:
+  safety-management-api:
+    build: .
+    container_name: safety-management-api
+    restart: unless-stopped
+    ports:
+      - "9999:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+      - LEDGER_TEMPLATE_PATH=/app/templates/safety_ledger_template.xlsx
